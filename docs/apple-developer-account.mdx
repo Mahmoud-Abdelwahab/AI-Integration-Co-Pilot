@@ -1,0 +1,94 @@
+---
+title: Apple Developer Account
+sidebar_position: 6.0
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
+
+# Apple Pay Using Developer Account
+
+This guide walks you through the steps necessary to start accepting Apple Pay payments using Moyasar and your Apple developer account.
+
+## Who is this guide for?
+
+Follow this guide if you intend on using Apple Pay natively within your iOS application or using a web platform that
+does not support Moyasar [Web Registration](/guides/apple-pay/web-registration).
+
+## Before Starting
+
+- [Register](https://dashboard.moyasar.com/register) for a free account in Moyasar Dashboard
+- You must have an **Apple Developer Account** with an active subscription.
+- Create a **Merchant ID** by following this guide [this guide.](https://developer.apple.com/documentation/apple_pay_on_the_web/configuring_your_environment).
+
+## Configure Payment Processing Certificate
+
+The Payment Processing Certificate (PPC for short) is used during the payment authorizatino process where an Apple
+device will encrypt the Card details using the active certificate.
+
+After the encryption, the merchant will receive a `token` object that they should pass to Moyasar in the payment request as follows:
+
+```json
+{
+  "type": "applepay",
+  "source": "<encrypted_token>"
+}
+```
+
+Once received, Moyasar will use the certificate to decrypt the token and then perform the payment.
+
+## Request and Download the CSR
+
+From Moyasar Dashboard, you need to navigate through **Settings** to **Apple Pay - Certificate**.
+
+Once you open the page, click on **Request CSR** then **Download CSR**.
+
+<ThemedImage
+  alt="Adding Apple Pay Domain Name"
+  sources={{
+    light: useBaseUrl('/assets/dashboard/ppc/ap-ppc-download-light.png'),
+    dark: useBaseUrl('/assets/dashboard/ppc/ap-ppc-download-dark.png'),
+  }}
+/>
+
+## Upload and Sign the CSR with Apple Developer Account
+
+Assuming you have followed the steps in [Before Starting](#before-starting) you should have your **Merchant ID**
+ready within your Apple Developer Account.
+
+Navigate to the Merchant ID you have created then locate the **Apple Pay Payment Processing Certificate** section
+where you will find a button called **Create Certificate**.
+
+![Payment Processing Certificate Creation](/assets/dashboard/ppc/apd-create-cert.png)
+
+:::warning
+
+You will be presented with a question asking you if the merchant is within **China Mainland**, make sure to
+to select **No**.
+
+If you select **Yes**, Apple Pay payments will not work with you as we do not support the RSA algorithm.
+
+:::
+
+## Select the CSR file and upload it.
+
+![Upload CSR](/assets/dashboard/ppc/apd-select-file.png)
+
+## Download the signed certificate.
+
+![Upload CSR](/assets/dashboard/ppc/apd-download-cert.png)
+
+## Upload Signed Certificate to Moyasar Dashboard
+
+Navigate back again to **Apple Pay - Certificate** then click on the **Upload File** box at the end of the page.
+Select `apple_pay.cer` from your computer and click **Upload**.
+
+If the certificate matches the private key on Moyasar API, you will get the following success screen.
+
+<ThemedImage
+  alt="Adding Apple Pay Domain Name"
+  sources={{
+    light: useBaseUrl('/assets/dashboard/ppc/ap-ppc-active-light.png'),
+    dark: useBaseUrl('/assets/dashboard/ppc/ap-ppc-active-dark.png'),
+  }}
+/>
