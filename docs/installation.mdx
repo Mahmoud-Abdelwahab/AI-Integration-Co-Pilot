@@ -1,0 +1,64 @@
+---
+title: Installation
+sidebar_position: 1.0
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<span className={'theme-doc-version-badge badge badge--primary'} children={'Version: 3.0.4'}></span>
+
+# Installation
+
+This guide will walk you through a straightforward solution to accept payments within your iOS application. The iOS SDK is a small framework built with **SwiftUI** that allows you to quickly and safely integrate Moyasar payments within your **SwiftUI** or **UIKit** apps.
+
+### Installing CocoaPods
+
+Before you can add the library to your project, you need to install **CocoaPods** on your macOS using the following command:
+
+<Tabs>
+    <TabItem value="Homebrew">
+        ```shell
+        brew install cocoapods
+        ```
+    </TabItem>
+
+    <TabItem value="RubyGems">
+        ```shell
+        gem install cocoapods
+        ```
+    </TabItem>
+
+</Tabs>
+
+### Add the Dependency
+
+If you haven't already added **CocoaPods** to your project, initialize it with:
+
+```shell
+pod init
+```
+
+Now add the following pod to your `Podfile`:
+
+```ruby
+pod 'MoyasarSdk', git: 'https://github.com/moyasar/moyasar-ios-pod.git'
+```
+
+:::info
+Make sure to add `use_frameworks!`.
+:::
+
+### Installing via Swift Package Manager
+
+Starting from version **v1.0.5**, the Moyasar iOS SDK supports **Swift Package Manager (SPM)**. To add the SDK to your project using SPM :
+
+1.  Open your project in Xcode.
+2.  Navigate to File > Add Packages....
+3.  Enter the Moyasar iOS SDK repository URL:
+
+```shell
+ https://github.com/moyasar/moyasar-ios-sdk
+```
+
+4.  Add the package to your project.

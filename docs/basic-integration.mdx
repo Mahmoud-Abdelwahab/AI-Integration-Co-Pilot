@@ -1,0 +1,218 @@
+---
+title: Basic Integration
+sidebar_position: 2.0
+---
+
+# Basic Integration
+
+## Configuring a Payment Request
+
+We need to prepare a `PaymentRequest` object:
+
+:::info
+
+- An error will be thrown if your apiKey is not valid.
+- Don't forget to import `MoyasarSdk`.
+  :::
+
+```swift
+ do {
+      let paymentRequest = try  PaymentRequest(
+      apiKey: "pk_live_1234567",
+      amount: 20001, // Amount in the smallest currency unit For example: 10 SAR = 10 * 100 Halalas
+      currency: "SAR",
+      description: "Flat White",
+      metadata: [ "order_id": .stringValue("ios_order_3214124"),
+                  "user_id": .integerValue(12345),
+                  "isPremiumUser": .booleanValue(true),
+                  "amount": .floatValue(15.5)
+                ],
+      manual: false,
+      saveCard: false,  // if it is True used to tokenize  Apple pay and Credit Card payments
+      givenID: UUID().uuidString, // Optional. The payment ID to be created from your side to apply Idempotency (UUID -- v4 is recommended).
+      allowedNetworks: [.mastercard, .visa, .mada], // Optional set your supported networks
+      payButtonType: .book // Optional by default it is .pay this determine the button title .
+      // Note: The total of all splits must equal the payment amount.
+/* splits: [
+   PaymentSplit(recipientId: "7d2d0797-a2be-40fe-bb1b-1fdec9824c95",
+                amount: 8000,
+                refundable: true),
+   PaymentSplit(recipientId: "327680bb-d790-4643-8e10-31455a1ab3a6",
+                amount: 2000,
+                reference: "optional-reference-for-split-1fcfcbe9-ba75-4eed",
+                description:"Platform processing fee",
+                feeSource: true,
+                refundable: false
+   )
+] */
+      )
+    } catch {
+        // Handle error here, show error in view model
+        fatalError("Invalid api key 🙁", error)
+    }
+```
+
+:::info
+Use the optional parameter `givenID` when you need to apply Idempotency **Retry Payment Creation** if you encounter any of the following:
+
+- A 5xx server error response.
+- A network error.
+- A timeout error (open, read, or write).
+
+---
+
+- ⚠️ Note: If you ever send the same `givenID` value for different payments, you will receive a 400 response with the error message `Payment is already created`.
+- Read more about [Idempotency](/api/idempotency) to understand the `givenID` parameter and avoid duplicate payments.
+  :::
+
+# Credit Card Payments
+
+### SwiftUI Credit Card Payments
+
+The SDK provides a **SwiftUI** view called `CreditCardView` that allows you to easily create a credit card form.
+We can add the `CreditCardView` to our view as follows:
+
+```swift
+struct ContentView: View {
+    func handlePaymentResult(_ result: PaymentResult) {
+        // ...
+    }
+
+    func handleCompletedPaymentResult(_ payment: ApiPayment) {
+        // ...
+    }
+
+    func handlePaymentError(_ error: MoyasarError) {
+        // Handle all MoyasarError enum cases
+    }
+
+    var body: some View {
+        CreditCardView(
+            request: paymentRequest,
+            callback: handlePaymentResult
+        )
+    }
+}
+```
+
+### UIKit Credit Card Payments
+
+If you are using UIKit you will need to create a wrapper to host the SwiftUI `CreditCardView` view:
+
+```swift
+    func makeCreditCardView() {
+        let creditCardView = CreditCardView(
+            request: paymentRequest,
+            callback: handlePaymentResult
+            )
+
+        let creditCardHostingController = UIHostingController(rootView: creditCardView)
+        creditCardHostingController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        addChild(creditCardHostingController)
+        view.addSubview(creditCardHostingController.view)
+        creditCardHostingController.didMove(toParent: self)
+
+        NSLayoutConstraint.activate([
+            creditCardHostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            creditCardHostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            creditCardHostingController.view.widthAnchor.constraint(equalTo: view.widthAnchor),
+            creditCardHostingController.view.heightAnchor.constraint(equalTo: view.heightAnchor)
+        ])
+    }
+```
+
+:::info
+Don't forget to import `SwiftUI`.
+:::
+
+| ![ios-sdk-dark-arabic.png](../../../static/assets/ios-sdk-dark-arabic.png) | ![ios-sdk-light-english.png](../../../static/assets/ios-sdk-light-english.png) |
+| :------------------------------------------------------------------------: | :----------------------------------------------------------------------------: |
+|                          **iOS SDK Dark Arabic**                           |                           **iOS SDK Light English**                            |
+
+## Handling Credit Card Payment Result
+
+Now, we can handle the Credit Card payment result as follows:
+
+```swift
+func handlePaymentResult(result: PaymentResult) {
+    switch (result) {
+    case .completed(let payment):
+        handleCompletedPaymentResult(payment)
+        break
+    case .failed(let error):
+        handlePaymentError(error)
+        break
+    case .canceled:
+        // Handle cancel Result
+        break
+    @unknown default:
+        // Handle any future cases
+         break
+    }
+}
+
+func handleCompletedPaymentResult(_ payment: ApiPayment) {
+    switch payment.status {
+    case .paid:
+        // Handle paid!
+        break
+    default:
+        // Handle other statuses like failed
+    }
+}
+
+func handlePaymentError(_ error: MoyasarError) {
+        // Handle all MoyasarError enum cases
+}
+```
+
+:::info
+If the payment failed during the 3DS authentication process, the `PaymentResult` will be `.failed` with the `MoyasarError` enum case beginning with `webview...`. You should fetch the payment as per [this documentation](/api/payments/02-fetch-payment.api.mdx) and check its status as it might be `paid`.
+:::
+
+:::warning
+Make sure to dismiss the webview screen after getting the result.
+:::
+The payment status could be `paid`, `failed`, or other statuses, we need to handle this:
+
+:::warning
+
+- A **Completed** payment does not guarantee success; it indicates that the payment process has been finalized successfully.
+- You need to check the payment status to ensure it is successful.
+  :::
+
+:::info
+[Payment Status Reference](/api/payments/payment-status-reference)
+:::
+
+## Support Custom Language
+
+By default, the SDK language follows your system language. If you want to support a custom language (e.g., your system language is English, but you want your app in Arabic), you can configure it as follows:
+
+- **For UIKit**, use the Moyasar language manager in the `AppDelegate` after setting your app’s language.
+- **For SwiftUI**, set the language in the main app structure (the equivalent of `AppDelegate` in SwiftUI).
+
+:::info
+We support Arabic (`ar`) and English (`en`).
+:::
+
+### Example:
+
+```swift
+MoyasarLanguageManager.shared.setLanguage(.ar)
+```
+
+## Objective-C Integration
+
+Set up a Swift file for handling payments as described in the steps above.
+After that, you can initialize the Swift payments class when processing payments.
+Learn more about integrating Swift files in **Objective-C** apps from [here](https://developer.apple.com/documentation/swift/importing-swift-into-objective-c).
+
+## APIs Documentation
+
+Moyasar iOS SDK [documentation](https://moyasar.github.io/moyasar-ios-sdk/documentation/moyasarsdk)
+
+## Demo Examples
+
+You can explore the UIKit and SwiftUI demos provided in the [moyasar-ios-sdk](https://github.com/moyasar/moyasar-ios-sdk) repository.
