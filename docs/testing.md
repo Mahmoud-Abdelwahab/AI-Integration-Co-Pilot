@@ -1,53 +1,90 @@
 ---
 title: Testing
-sidebar_position: 7.0
+sidebar_position: 7
 ---
 
 # Testing
 
-### Credit Cards
+Test your integration using Moyasar's sandbox environment. No real money is charged.
 
-Moyasar provides a sandbox environment for testing credit card payments without charging any real money. This allows you to test your integration and ensure that everything is working correctly before going live with actual payments. Learn more about [our testing cards](/guides/card-payments/test-cards)
+---
 
-### Apple Pay
+## Test API Key
 
-:::warning[Important]
-Testing using a simulator will not work! Learn how to test apply pay step by step in [Apple Pay testing](/guides/apple-pay/testing).
+Use your test API key (starts with `pk_test_`) for sandbox testing:
+
+```swift
+apiKey: "pk_test_YOUR_TEST_KEY"
+```
+
+[Get your API keys](/guides/dashboard/get-your-api-keys)
+
+---
+
+## Credit Card Testing
+
+Use the [Moyasar test cards](/guides/card-payments/test-cards) for sandbox credit card payments.
+
+### Common Test Cards
+
+| Card Number | Expected Result |
+|-------------|-----------------|
+| `4111 1111 1111 1111` | Success |
+| `4000 0000 0000 0002` | Requires 3DS authentication |
+| `5555 5555 5555 4444` | Success (Mastercard) |
+
+### Test Card Details
+
+When using test cards, you can use any:
+- **Expiry date** in the future
+- **CVV** (3 digits)
+- **Cardholder name**
+
+---
+
+## Apple Pay Testing
+
+:::warning
+Apple Pay testing **requires a physical device**. The simulator does not support Apple Pay.
 :::
 
-:::info
-Important: Test Payment Setup
-Before proceeding, please add your actual card to your wallet for testing purposes. However, ensure you are using our test environment by verifying:
+### Setup for Testing
 
-- The API key must begin with pk*test*
-- No real charges will be processed in this test environment
-- Your actual card details remain secure during testing
+1. Use a **test API key** (`pk_test_`)
+2. Add your **actual card** to the device's Wallet app
+3. No real charges will be processed in the test environment
 
-⚠️ Note: This configuration allows you to safely test the payment flow using real card credentials in a sandbox environment.
-:::
+### Why Apple Pay Requires a Physical Device
 
-Apple Pay testing in a simulator does not work due to several technical limitations tied to how Apple Pay operates in a real environment. Here’s a detailed explanation:
+| Limitation | Description |
+|------------|-------------|
+| **Secure Element** | Apple Pay uses a hardware component not available in the simulator |
+| **Card Provisioning** | Real cards must be added to Wallet, which the simulator cannot do |
+| **Biometric Authentication** | Face ID / Touch ID require physical hardware |
+| **NFC** | Contactless payment simulation is not supported in the simulator |
 
-**1. Secure Element:** Apple Pay relies on a hardware component called the **Secure Element**, which is embedded in iOS devices. The iOS simulator, however, does not have access to this hardware component, making it impossible to simulate the secure, end-to-end payment process that Apple Pay requires.
+See [Apple Pay Testing Guide](/guides/apple-pay/testing) for detailed testing steps.
 
-**2. Provisioning of Payment Cards:** To use Apple Pay, payment cards must be provisioned into the Wallet app, which involves validating the card with the issuing bank and securely storing the card information in the **Secure Element**. This process cannot be replicated in the simulator since it does not support adding real or test payment cards to Wallet.
+---
 
-**3. Real-World Authentication:** Apple Pay transactions require real-world authentication methods like **Face ID**, **Touch ID**, or a **passcode**, to confirm payments. These authentication methods are tied to the physical hardware of iOS devices. The simulator cannot replicate these biometric authentications because it lacks the necessary hardware.
+## STC Pay Testing
 
-**4. Encryption and Security Protocols:** Apple Pay uses advanced encryption and security protocols that are managed by the **Secure Enclave**, another hardware-based security feature present in physical devices. The simulator does not have a **Secure Enclave**, so it cannot properly handle the encryption processes required for **Apple Pay** transactions.
+Use the sandbox OTP codes to test different STC Pay scenarios:
 
-**5. Device-Specific Features:** Certain features of Apple Pay, like near-field communication **(NFC)** for contactless payments, are directly tied to the physical device’s hardware. Since the simulator lacks these hardware capabilities, it cannot simulate **NFC-based** transactions or the user experience associated with making payments using Apple Pay.
+| OTP | Result |
+|-----|--------|
+| `123456` | Success |
+| `000000` | Success |
+| `111111` | Insufficient Funds |
+| `222222` | Daily Limit Exceeded |
+| `333333` | Transaction Limit Exceeded |
+| `444444` | Timeout |
+| Any other | Invalid OTP |
 
-Because of these reasons, developers must test Apple Pay on a physical iOS device to accurately simulate the payment flow and ensure the integration works as expected.
+---
 
-### STC Pay
+## Next Steps
 
-| Sandbox OTP | Context                    |
-| ----------- | -------------------------- |
-| 123456      | Success                    |
-| 000000      | Success                    |
-| 111111      | Insufficient Funds         |
-| 222222      | Daily Limit Exceeded       |
-| 333333      | Transaction Limit Exceeded |
-| 444444      | Timeout                    |
-| Other       | Invalid OTP                |
+- [Basic Integration](/sdk/ios/basic-integration) — Accept your first payment
+- [Apple Pay Integration](/sdk/ios/apple-pay-payments-integration) — Add wallet payments
+- [STC Pay Integration](/sdk/ios/stc-pay-integration) — Add STC Pay support

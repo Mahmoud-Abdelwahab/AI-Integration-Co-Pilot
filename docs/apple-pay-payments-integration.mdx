@@ -1,0 +1,364 @@
+---
+title: Apple Pay Payments Integration
+sidebar_position: 3
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+# Apple Pay Integration
+
+Enable Apple Pay payments for a seamless checkout experience using Face ID or Touch ID.
+
+---
+
+## Prerequisites
+
+- **Moyasar account** — [Sign up](https://dashboard.moyasar.com/register/new)
+- **Publishable API key** — [Get your API keys](/guides/dashboard/get-your-api-keys)
+- **Apple Developer Account** — With an active membership
+- **Physical iOS device** — Apple Pay requires a real device (simulator not supported)
+- **Xcode** — For configuring capabilities
+
+---
+
+## Step 1: Configure Apple Pay in Apple Developer Account
+
+### 1.1 Create a Merchant ID
+
+1. Sign in to your [Apple Developer Account](https://developer.apple.com/account)
+2. Navigate to **Certificates, Identifiers & Profiles**
+3. Select **Identifiers** from the left sidebar
+4. Click the **+** button to create a new identifier
+5. Select **Merchant IDs** and click **Continue**
+6. Enter a description (e.g., "Your App Name Apple Pay")
+7. Enter an identifier in the format `merchant.com.yourcompany.yourapp`
+8. Click **Continue** then **Register**
+
+### 1.2 Enable Apple Pay Capability for Your App ID
+
+1. In **Certificates, Identifiers & Profiles**, select **Identifiers**
+2. Find and select your app's Bundle ID
+3. Scroll down to **Capabilities** section
+4. Check the box for **Apple Pay**
+5. Click **Save**
+
+### 1.3 Create Apple Pay Payment Processing Certificate
+
+1. In your Apple Developer Account, go to **Certificates, Identifiers & Profiles**
+2. Select **Merchant IDs** from the left sidebar
+3. Click on your Merchant ID
+4. Under **Apple Pay Payment Processing Certificate**, click **Create Certificate**
+5. You will be asked: "Will payments be processed in China Mainland?" — Select **No** (unless applicable)
+6. Download the CSR (Certificate Signing Request) file from Moyasar Dashboard (see Step 2)
+7. Upload the CSR file to Apple
+8. Download the generated `.cer` certificate file
+
+### 1.4 Add Apple Pay Capability in Xcode
+
+1. Open your project in Xcode
+2. Select your app target
+3. Go to **Signing & Capabilities** tab
+4. Click **+ Capability** and select **Apple Pay**
+5. Check the box next to your Merchant ID (`merchant.com.yourcompany.yourapp`)
+6. Ensure your team is selected for code signing
+
+---
+
+## Step 2: Configure Apple Pay in Moyasar Dashboard
+
+### 2.1 Download CSR from Moyasar
+
+1. Log in to your [Moyasar Dashboard](https://dashboard.moyasar.com)
+2. Navigate to **Settings** → **Apple Pay**
+3. Under the **Certificate** section, click **Request CSR**
+4. Click **Download CSR** to save the `.csr` file to your computer
+
+### 2.2 Upload CSR to Apple Developer Account
+
+1. Go to [Apple Developer Account](https://developer.apple.com/account) → **Certificates, Identifiers & Profiles**
+2. Select **Merchant IDs** and click on your Merchant ID
+3. Under **Apple Pay Payment Processing Certificate**, click **Create Certificate**
+4. Click **Continue** on the instructions page
+5. Upload the `.csr` file you downloaded from Moyasar
+6. Click **Continue** then **Download** to get the `.cer` file
+
+### 2.3 Upload Certificate to Moyasar
+
+1. Return to [Moyasar Dashboard](https://dashboard.moyasar.com) → **Settings** → **Apple Pay**
+2. Under the **Certificate** section, click **Upload File**
+3. Select the `.cer` file you downloaded from Apple
+4. Click **Upload** to complete the certificate exchange
+
+### 2.4 Verify Configuration
+
+1. Ensure the certificate status shows as **Active** in Moyasar Dashboard
+2. Verify your Merchant ID matches the one configured in Xcode
+3. Test with a sandbox card to confirm the integration works
+
+---
+
+## Step 3: Create the Payment Handler
+
+Create a class that conforms to `PKPaymentAuthorizationControllerDelegate`. This handler manages the entire Apple Pay payment flow.
+
+```swift
+import MoyasarSdk
+import PassKit
+
+class ApplePayPaymentHandler: NSObject, PKPaymentAuthorizationControllerDelegate {
+    private var applePayService: ApplePayService?
+    private var controller: PKPaymentAuthorizationController?
+    private let paymentRequest: PaymentRequest
+    
+    init(paymentRequest: PaymentRequest) throws {
+        self.paymentRequest = paymentRequest
+        self.applePayService = try ApplePayService(
+            apiKey: paymentRequest.apiKey,
+            baseUrl: paymentRequest.baseUrl
+        )
+    }
+}
+```
+
+---
+
+## Step 4: Present the Apple Pay Sheet
+
+Configure and present the `PKPaymentAuthorizationController`:
+
+```swift
+func present() {
+    let request = PKPaymentRequest()
+    request.paymentSummaryItems = [
+        PKPaymentSummaryItem(label: "Your App Name", amount: 200.00, type: .final)
+    ]
+    request.merchantIdentifier = "merchant.com.yourapp"
+    request.countryCode = "SA"
+    request.currencyCode = "SAR"
+    request.supportedNetworks = [.visa, .mastercard, .mada, .amex]
+    request.merchantCapabilities = [.capability3DS, .capabilityCredit, .capabilityDebit]
+    
+    controller = PKPaymentAuthorizationController(paymentRequest: request)
+    controller?.delegate = self
+    controller?.present { presented in
+        print("Apple Pay presented: \(presented)")
+    }
+}
+```
+
+---
+
+## Step 5: Handle Payment Authorization
+
+Process the authorized payment through Moyasar:
+
+```swift
+/// This delegate method is called when the user authorizes the payment using Face ID, Touch ID, or passcode.
+/// It is the most critical part of the integration — you must:
+///   1. Send the Apple Pay token to Moyasar for payment processing
+///   2. Call the completion handler with success or failure status
+///   3. Never leave this method without calling the completion handler (causes Apple Pay sheet to hang)
+func paymentAuthorizationController(
+    _ controller: PKPaymentAuthorizationController,
+    didAuthorizePayment payment: PKPayment,
+    handler completion: @escaping (PKPaymentAuthorizationResult) -> Void
+) {
+    Task {
+        do {
+            // Ensure the service is initialized before proceeding
+            guard let applePayService else {
+                let error = NSError(
+                    domain: "ApplePayError",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Apple Pay service not initialized"]
+                )
+                completion(PKPaymentAuthorizationResult(status: .failure, errors: [error]))
+                return
+            }
+            
+            // Send the Apple Pay token to Moyasar to process and confirm the payment
+            // The payment.token contains the encrypted payment data from Apple
+            let result = try await applePayService.authorizePayment(
+                request: paymentRequest,
+                token: payment.token
+            )
+            
+            switch result.status {
+            case .paid:
+                // Payment was successfully processed — dismiss Apple Pay with success animation
+                if case let .applePay(source) = result.source {
+                    // If you enabled Apple Pay tokenization (saveCard = true in PaymentRequest),
+                    // you can access the tokenized card reference here.
+                    // Contact Moyasar support to enable this feature.
+                    print(source.token ?? "")
+                }
+                completion(PKPaymentAuthorizationResult(status: .success, errors: []))
+            case .failed:
+                // Payment failed — show error to user
+                if case let .applePay(source) = result.source {
+                    let error = NSError(
+                        domain: "ApplePayError",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: source.message ?? "Payment failed"]
+                    )
+                    completion(PKPaymentAuthorizationResult(status: .failure, errors: [error]))
+                }
+            default:
+                // Unexpected payment status — log and show error
+                let error = NSError(
+                    domain: "ApplePayError",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Unexpected payment status"]
+                )
+                completion(PKPaymentAuthorizationResult(status: .failure, errors: [error]))
+            }
+        } catch {
+            // Network or API error — show error to user
+            completion(PKPaymentAuthorizationResult(status: .failure, errors: [error]))
+        }
+    }
+}
+```
+
+> **Note on Tokenization:** If you set `saveCard = true` in your `PaymentRequest` and have Apple Pay tokenization enabled on your Moyasar account, the `source.token` field will contain the tokenized card reference. Contact Moyasar support to enable this feature.
+
+---
+
+## Step 6: Dismiss the Apple Pay Sheet
+
+```swift
+func paymentAuthorizationControllerDidFinish(_ controller: PKPaymentAuthorizationController) {
+    controller.dismiss(completion: nil)
+}
+```
+
+---
+
+## Step 7: Use the Handler in Your App
+
+<Tabs>
+  <TabItem value="swiftui" label="SwiftUI">
+
+First, create the `ApplePayButton` wrapper — a SwiftUI wrapper around Apple's `PKPaymentButton`:
+
+```swift
+import SwiftUI
+import PassKit
+
+struct ApplePayButton: UIViewRepresentable {
+    var action: UIAction
+    
+    func makeUIView(context: Context) -> PKPaymentButton {
+        let button = PKPaymentButton(paymentButtonType: .checkout, paymentButtonStyle: .black)
+        button.addAction(action, for: .touchUpInside)
+        return button
+    }
+    
+    func updateUIView(_ uiView: PKPaymentButton, context: Context) {
+        // No updates needed for this simple wrapper
+    }
+}
+```
+
+Then use it in your view:
+
+```swift
+import SwiftUI
+import MoyasarSdk
+import PassKit
+
+struct ContentView: View {
+    @State private var handler: ApplePayPaymentHandler?
+    
+    var body: some View {
+        ApplePayButton(action: UIAction { _ in
+            presentApplePay()
+        })
+        .frame(height: 50)
+    }
+    
+    func presentApplePay() {
+        do {
+            // createPaymentRequest() is defined in the Basic Integration guide
+            handler = try ApplePayPaymentHandler(paymentRequest: createPaymentRequest())
+            handler?.present()
+        } catch {
+            print("Failed to initialize ApplePay: \(error)")
+        }
+    }
+}
+```
+
+  </TabItem>
+  <TabItem value="uikit" label="UIKit">
+
+```swift
+import UIKit
+import PassKit
+import MoyasarSdk
+
+class PaymentViewController: UIViewController {
+    var handler: ApplePayPaymentHandler?
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupApplePayButton()
+    }
+    
+    func setupApplePayButton() {
+        let applePayButton = PKPaymentButton(
+            paymentButtonType: .checkout,
+            paymentButtonStyle: .black
+        )
+        applePayButton.addAction(UIAction { [weak self] _ in
+            self?.presentApplePay()
+        }, for: .touchUpInside)
+        
+        view.addSubview(applePayButton)
+        // Add constraints...
+    }
+    
+    func presentApplePay() {
+        do {
+            // createPaymentRequest() is defined in the Basic Integration guide
+            handler = try ApplePayPaymentHandler(paymentRequest: createPaymentRequest())
+            handler?.present()
+        } catch {
+            print("Failed to initialize ApplePay: \(error)")
+        }
+    }
+}
+```
+
+  </TabItem>
+</Tabs>
+
+---
+
+## Important Notes
+
+- **Always call the completion handler** in `didAuthorizePayment` — failing to do so will cause the Apple Pay sheet to hang
+- **Import PassKit** — Required for all Apple Pay functionality
+- **Test on a physical device** — Apple Pay does not work in the simulator
+- **Use test API keys** — Use `pk_test_` keys for sandbox testing
+- **Merchant ID must match** — The Merchant ID in your code must match the one configured in Xcode and Apple Developer Account
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Apple Pay button not showing | Ensure Apple Pay capability is enabled in Xcode and Merchant ID is selected |
+| Payment fails with certificate error | Verify the Apple Pay certificate is uploaded and active in Moyasar Dashboard |
+| "Merchant ID not found" error | Check that the Merchant ID in code matches Xcode configuration |
+| Apple Pay not available on device | Ensure device supports Apple Pay and has a card added to Wallet |
+
+---
+
+## Next Steps
+
+- [Testing Apple Pay](/sdk/ios/testing) — Test with real cards in sandbox
+- [STC Pay Integration](/sdk/ios/stc-pay-integration) — Add STC Pay support
+- [Payment Status Reference](/api/payments/payment-status-reference) — Understand payment statuses

@@ -1,140 +1,215 @@
 ---
 title: Customizing STC Pay
-sidebar_position: 6.0
+sidebar_position: 6
 ---
 
-# Customize STC Pay View
+# Custom STC Pay UI
 
-This guide shows how to build your own STC Pay UI while reusing the `STCPayViewModel` from the Moyasar iOS SDK.  
-You are free to design any SwiftUI layout you want, as long as you call the exposed APIs and listen to the published state described below.
+Build your own STC Pay form while using the SDK's `STCPayViewModel` for payment processing.
 
-## 1. Create a `PaymentRequest`
+---
 
-First, prepare a `PaymentRequest` instance:
+## Overview
 
-:::info
-`PaymentRequest` can throw an error (for example, if your `apiKey` is invalid), so make sure to handle it properly.
-:::
+The `STCPayViewModel` exposes all the logic you need for STC Pay payments. Your custom view only needs to:
 
-```swift
-do {
-    let paymentRequest = try PaymentRequest(
-        apiKey: "pk_live_1234567",
-        amount: 1000, // Amount in the smallest currency unit. For example: 10 SAR = 10 * 100 halalas
-        currency: "SAR",
-        description: "Flat White",
-        metadata: [
-            "order_id": .stringValue("ios_order_3214124"),
-            "user_id": .integerValue(12345),
-            "isPremiumUser": .booleanValue(true),
-            "amount": .floatValue(15.5)
-        ],
-        manual: false,
-        saveCard: false,
-        allowedNetworks: [.mastercard, .visa, .mada], // Optional: set your supported networks
-        payButtonType: .book // Optional: determines the button title. Default is `.pay`
-    )
-} catch {
-    // Handle the error here (e.g. show an error in your view model / UI)
-    fatalError("Invalid API key 🙁 \(error)")
-}
-```
+1. Display the appropriate step (mobile number or OTP)
+2. Call the view model's methods
+3. Listen to published state changes
 
-## 2. Build Your Own Custom STC Pay View
+---
 
-When creating your own UI, keep these points in mind.  
-`STCPayViewModel` exposes all the logic you need; your view just needs to:
-
-1. **Start the payment using the mobile number**
-
-   Call `initiatePayment()` when the user taps the Pay button in the mobile number step:
-
-   ```swift
-   Task {
-       await viewModel.initiatePayment()
-   }
-   ```
-
-2. **Submit the OTP**
-
-   Call `submitOtp()` when the user enters a valid OTP and taps the Confirm button:
-
-   ```swift
-   Task {
-       await viewModel.submitOtp()
-   }
-   ```
-
-3. **Switch between steps using `screenStep`**
-
-   There are two steps in the STC Pay flow:
-
-   - `.mobileNumber` — user enters their mobile number
-   - `.otp` — user enters the OTP received via SMS
-
-   Use the `screenStep` property to decide which content to show:
-
-   ```swift
-   switch viewModel.screenStep {
-   case .mobileNumber:
-       phoneNumberTextFieldView()
-   case .otp:
-       otpTextFieldView()
-   }
-   ```
-
-4. **Listen to the loading state**
-
-   Use `viewModel.isLoading` to show/hide a loading indicator or disable your buttons
-   while a request is in progress.
-
-:::info
-Now you have `initiatePayment()`, `submitOtp()`, `screenStep`, `viewModel.isLoading` and `STCResultCallback` now you have everything to setup your own view
-:::
-
-### Example: SwiftUI Custom STC Pay View
-
-You can either inject an existing `STCPayViewModel`, or let your custom view create it from a `PaymentRequest`.
-
-** – Provide a `PaymentRequest` and callback:**
+## Step 1: Create a Payment Request
 
 ```swift
-let paymentRequest = try createSTCPaymentRequest()
+import MoyasarSdk
 
-MyCustomSTCPayView(paymentRequest: paymentRequest) { result in
-    handleSTCResult(result)
-}
-```
-
-:::info
-
-- View [Custom SwiftUI example](https://github.com/moyasar/moyasar-ios-sdk/blob/master/SwiftUiDemo/SwiftUiDemo/Custom%20View/CustomSTCPayView.swift) for the full example
-
-- View [Custom UIKit example](https://github.com/moyasar/moyasar-ios-sdk/blob/master/UIKitDemo/UIKitDemo/CustomSTCPayView.swift) for the full example
-  :::
-
-## 3. Handling the Payment Result
-
-Your result callback will receive a `Result<ApiPayment, MoyasarError>`.  
-You can inspect the payment status and handle success/failure accordingly:
-
-```swift
-func handleSTCResult(_ result: Result<ApiPayment, MoyasarError>) {
-    switch result {
-    case let .success(payment):
-        if payment.status == .paid {
-            print("Payment paid successfully")
-        } else if payment.status == .failed {
-            print("Payment failed")
-        }
-
-    case let .failure(error):
-        print("Something went wrong: \(encloseMoyasarError(error).localizedDescription)")
+func createSTCPaymentRequest() -> PaymentRequest {
+    do {
+        return try PaymentRequest(
+            apiKey: "pk_test_YOUR_API_KEY",
+            amount: 1000,
+            currency: "SAR",
+            description: "Order #12345",
+            metadata: [
+                "order_id": .stringValue("ios_order_3214124")
+            ]
+        )
+    } catch {
+        fatalError("Invalid API key: \(error)")
     }
 }
 ```
 
-:::info
-For more details about the possible payment statuses, see:  
-[Payment Status Reference](/api/payments/payment-status-reference)
-:::
+---
+
+## Step 2: Create Your Custom View
+
+Initialize your view with a `PaymentRequest` and a result callback:
+
+```swift
+import SwiftUI
+import MoyasarSdk
+
+struct MyCustomSTCPayView: View {
+    @ObservedObject var viewModel: STCPayViewModel
+    
+    init(paymentRequest: PaymentRequest, callback: @escaping STCResultCallback) {
+        self._viewModel = ObservedObject(
+            wrappedValue: STCPayViewModel(
+                paymentRequest: paymentRequest,
+                resultCallback: callback
+            )
+        )
+    }
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            switch viewModel.screenStep {
+            case .mobileNumber:
+                phoneStep
+            case .otp:
+                otpStep
+            }
+        }
+        .padding()
+    }
+}
+```
+
+---
+
+## Step 3: Build the Mobile Number Step
+
+```swift
+private var phoneStep: some View {
+    VStack(alignment: .leading, spacing: 12) {
+        Text("Mobile Number")
+            .font(.headline)
+        
+        TextField("05XXXXXXXX", text: $viewModel.mobileNumber)
+            .keyboardType(.phonePad)
+            .textFieldStyle(.roundedBorder)
+        
+        if !viewModel.isValidPhoneNumber && viewModel.showErrorHintView.value {
+            Text("Invalid phone number")
+                .foregroundColor(.red)
+                .font(.caption)
+        }
+        
+        Button(action: {
+            Task {
+                await viewModel.initiatePayment()
+            }
+        }) {
+            if viewModel.isLoading {
+                ProgressView()
+            } else {
+                Text("Pay")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .disabled(!viewModel.isValidPhoneNumber)
+        .buttonStyle(.borderedProminent)
+    }
+}
+```
+
+---
+
+## Step 4: Build the OTP Step
+
+```swift
+private var otpStep: some View {
+    VStack(alignment: .leading, spacing: 12) {
+        Text("Enter OTP")
+            .font(.headline)
+        
+        TextField("XXXXXX", text: $viewModel.otp)
+            .keyboardType(.numberPad)
+            .textFieldStyle(.roundedBorder)
+        
+        if !viewModel.isValidOtp && viewModel.showErrorHintView.value {
+            Text("Invalid OTP")
+                .foregroundColor(.red)
+                .font(.caption)
+        }
+        
+        Button(action: {
+            Task {
+                await viewModel.submitOtp()
+            }
+        }) {
+            if viewModel.isLoading {
+                ProgressView()
+            } else {
+                Text("Confirm")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .disabled(!viewModel.isValidOtp)
+        .buttonStyle(.borderedProminent)
+    }
+}
+```
+
+---
+
+## STCPayViewModel Properties
+
+### Published Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `mobileNumber` | String | User's phone number (bind to your text field) |
+| `otp` | String | User's OTP code (bind to your text field) |
+| `screenStep` | STCStep | Current step: `.mobileNumber` or `.otp` |
+| `isLoading` | Bool | True while a network request is in progress |
+| `isValidPhoneNumber` | Bool | True if phone number passes validation |
+| `isValidOtp` | Bool | True if OTP passes validation |
+| `showErrorHintView` | Bool | Whether to show error hints |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `initiatePayment()` | Submit the mobile number to initiate STC Pay payment |
+| `submitOtp()` | Submit the OTP to complete the payment |
+
+---
+
+## Step 5: Handle the Payment Result
+
+```swift
+func handleSTCResult(_ result: Result<ApiPayment, MoyasarError>) {
+    switch result {
+    case .success(let payment):
+        switch payment.status {
+        case .paid:
+            print("STC Pay successful: \(payment.id)")
+        case .failed:
+            print("STC Pay failed")
+        default:
+            print("STC Pay status: \(payment.status)")
+        }
+    case .failure(let error):
+        print("STC Pay error: \(error)")
+    }
+}
+```
+
+---
+
+## Complete Examples
+
+See the full implementations in the demo projects:
+
+- [SwiftUI Custom STC Pay Example](https://github.com/moyasar/moyasar-ios-sdk/blob/master/SwiftUiDemo/SwiftUiDemo/Custom%20View/CustomSTCPayView.swift)
+- [UIKit Custom STC Pay Example](https://github.com/moyasar/moyasar-ios-sdk/blob/master/UIKitDemo/UIKitDemo/CustomSTCPayView.swift)
+
+---
+
+## Next Steps
+
+- [Testing Guide](/sdk/ios/testing) — Test with sandbox OTP codes
+- [Payment Status Reference](/api/payments/payment-status-reference) — Understand payment statuses

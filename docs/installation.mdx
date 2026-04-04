@@ -1,6 +1,6 @@
 ---
 title: Installation
-sidebar_position: 1.0
+sidebar_position: 1
 ---
 
 import Tabs from '@theme/Tabs';
@@ -10,55 +10,83 @@ import TabItem from '@theme/TabItem';
 
 # Installation
 
-This guide will walk you through a straightforward solution to accept payments within your iOS application. The iOS SDK is a small framework built with **SwiftUI** that allows you to quickly and safely integrate Moyasar payments within your **SwiftUI** or **UIKit** apps.
+Install the Moyasar iOS SDK using **CocoaPods** or **Swift Package Manager (SPM)**.
 
-### Installing CocoaPods
+## Requirements
 
-Before you can add the library to your project, you need to install **CocoaPods** on your macOS using the following command:
+- iOS 13.0+
+- Xcode 16+
+- Swift 5.7+
+
+---
+
+## Option 1: CocoaPods
+
+### Step 1: Install CocoaPods (if not already installed)
 
 <Tabs>
-    <TabItem value="Homebrew">
-        ```shell
-        brew install cocoapods
-        ```
-    </TabItem>
-
-    <TabItem value="RubyGems">
-        ```shell
-        gem install cocoapods
-        ```
-    </TabItem>
-
+  <TabItem value="homebrew" label="Homebrew">
+    ```shell
+    brew install cocoapods
+    ```
+  </TabItem>
+  <TabItem value="rubygems" label="RubyGems">
+    ```shell
+    gem install cocoapods
+    ```
+  </TabItem>
 </Tabs>
 
-### Add the Dependency
-
-If you haven't already added **CocoaPods** to your project, initialize it with:
+### Step 2: Initialize CocoaPods in your project
 
 ```shell
 pod init
 ```
 
-Now add the following pod to your `Podfile`:
+### Step 3: Add the Moyasar SDK to your `Podfile`
 
 ```ruby
+use_frameworks!
+
 pod 'MoyasarSdk', git: 'https://github.com/moyasar/moyasar-ios-pod.git'
 ```
 
-:::info
-Make sure to add `use_frameworks!`.
-:::
-
-### Installing via Swift Package Manager
-
-Starting from version **v1.0.5**, the Moyasar iOS SDK supports **Swift Package Manager (SPM)**. To add the SDK to your project using SPM :
-
-1.  Open your project in Xcode.
-2.  Navigate to File > Add Packages....
-3.  Enter the Moyasar iOS SDK repository URL:
+### Step 4: Install the pod
 
 ```shell
- https://github.com/moyasar/moyasar-ios-sdk
+pod install
 ```
 
-4.  Add the package to your project.
+---
+
+## Option 2: Swift Package Manager (SPM)
+
+### Step 1: Add the package
+
+In Xcode, navigate to **File > Add Packages...** and enter the repository URL:
+
+```
+https://github.com/moyasar/moyasar-ios-sdk
+```
+
+### Step 2: Add the dependency to your target
+
+Select the **MoyasarSdk** package and add it to your app target.
+
+---
+
+## Verify Installation
+
+Import the SDK in your Swift file:
+
+```swift
+import MoyasarSdk
+```
+
+---
+
+## Next Steps
+
+- [Basic Integration](/sdk/ios/basic-integration) — Accept your first payment
+- [Apple Pay](/sdk/ios/apple-pay-payments-integration) — Add wallet payments
+- [STC Pay](/sdk/ios/stc-pay-integration) — Add STC Pay support
