@@ -54,6 +54,16 @@
       padding: 12px 16px;
       border-radius: 8px;
       line-height: 1.5;
+      opacity: 0;
+      transform: translateY(20px);
+      animation: fadeInMessage 0.3s ease-out forwards;
+    }
+
+    @keyframes fadeInMessage {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
     .user-message {
       background: linear-gradient(135deg, #667eea, #764ba2);
@@ -77,10 +87,12 @@
       border-radius: 25px;
       font-size: 16px;
       outline: none;
-      transition: border-color 0.3s;
+      transition: all 0.3s ease;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
     }
     #question:focus {
       border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
     }
     button {
       padding: 12px 24px;
@@ -90,15 +102,22 @@
       border-radius: 25px;
       font-size: 16px;
       cursor: pointer;
-      transition: transform 0.2s;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
     }
     button:hover {
-      transform: translateY(-2px);
+      transform: translateY(-3px) scale(1.02);
+      box-shadow: 0 6px 15px rgba(0,0,0,0.2);
+    }
+    button:active {
+      transform: translateY(0) scale(0.98);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
+      box-shadow: none;
     }
     .loading {
       display: inline-block;
@@ -177,7 +196,10 @@
       const sendBtn = document.getElementById('sendBtn');
 
       // Add user message
-      chat.innerHTML += `<div class="message user-message"><strong>You:</strong> ${question}</div>`;
+      const userMessageDiv = document.createElement('div');
+      userMessageDiv.className = 'message user-message';
+      userMessageDiv.innerHTML = `<strong>You:</strong> ${question}`;
+      chat.appendChild(userMessageDiv);
       document.getElementById('question').value = '';
 
       // Show loading state
@@ -195,9 +217,15 @@
         const data = await response.json();
         const formattedAnswer = formatResponse(data.answer);
 
-        chat.innerHTML += `<div class="message ai-message"><strong>AI:</strong> ${formattedAnswer}</div>`;
+        const aiMessageDiv = document.createElement('div');
+        aiMessageDiv.className = 'message ai-message';
+        aiMessageDiv.innerHTML = `<strong>AI:</strong> ${formattedAnswer}`;
+        chat.appendChild(aiMessageDiv);
       } catch (error) {
-        chat.innerHTML += `<div class="message ai-message"><strong>AI:</strong> Sorry, I encountered an error. Please try again.</div>`;
+        const errorMessageDiv = document.createElement('div');
+        errorMessageDiv.className = 'message ai-message';
+        errorMessageDiv.innerHTML = `<strong>AI:</strong> Sorry, I encountered an error. Please try again.`;
+        chat.appendChild(errorMessageDiv);
         console.error('Error:', error);
       } finally {
         // Hide loading state
