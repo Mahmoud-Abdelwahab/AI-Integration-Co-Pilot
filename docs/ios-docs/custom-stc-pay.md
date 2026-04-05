@@ -1,5 +1,5 @@
 ---
-title: Customizing STC Pay
+title: Custom STC Pay UI
 sidebar_position: 6
 ---
 

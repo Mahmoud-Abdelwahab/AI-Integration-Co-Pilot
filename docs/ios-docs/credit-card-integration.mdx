@@ -1,14 +1,21 @@
 ---
-title: Basic Integration
+title: Credit Card Integration
 sidebar_position: 2
+description: Learn how to integrate credit card payments in SwiftUI and UIKit using Moyasar's built-in CreditCardView
+keywords: credit card, SwiftUI, UIKit, payment integration, CreditCardView, card payment, iOS SDK, Moyasar, Visa, Mastercard, Mada, AMEX
+tags: [credit-card, swiftui, uikit, payment, integration]
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Basic Integration
+# Credit Card Integration
 
-Accept credit card payments using the SDK's built-in `CreditCardView`.
+Accept credit card payments (Visa, Mastercard, Mada, AMEX) using the SDK's built-in `CreditCardView`.
+
+> **SwiftUI Quick Start:** Jump directly to the [SwiftUI Integration Section](#swiftui-integration) for a complete SwiftUI example.
+> 
+> **UIKit Quick Start:** Jump directly to the [UIKit Integration Section](#uikit-integration) for a complete UIKit example.
 
 ---
 
@@ -89,7 +96,9 @@ func createPaymentRequest() -> PaymentRequest {
 ## Step 2: Add the Credit Card View
 
 <Tabs>
-  <TabItem value="swiftui" label="SwiftUI">
+  <TabItem value="swiftui" label="SwiftUI" id="swiftui-integration">
+
+### SwiftUI Integration
 
 ```swift
 import SwiftUI
@@ -120,7 +129,9 @@ struct ContentView: View {
 ```
 
   </TabItem>
-  <TabItem value="uikit" label="UIKit">
+  <TabItem value="uikit" label="UIKit" id="uikit-integration">
+
+### UIKit Integration
 
 ```swift
 import UIKit
@@ -258,7 +269,7 @@ MoyasarLanguageManager.shared.setLanguage(.ar)  // or .en
 
 ## Next Steps
 
-- [Apple Pay Integration](/sdk/ios/apple-pay-payments-integration) — Add wallet payments
+- [Apple Pay Integration](/sdk/ios/apple-pay-integration) — Add wallet payments
 - [STC Pay Integration](/sdk/ios/stc-pay-integration) — Add STC Pay support
 - [Custom Credit Card UI](/sdk/ios/custom-credit-card-view) — Build your own card form
 - [Testing Guide](/sdk/ios/testing) — Test with sandbox cards

@@ -1,0 +1,85 @@
+---
+title: iOS SDK Documentation
+sidebar_position: 1
+---
+
+# Moyasar iOS SDK Documentation
+
+Accept payments in your iOS app with Moyasar's secure payment SDK.
+
+---
+
+## Quick Start
+
+### 1. Install the SDK
+
+Choose your preferred installation method:
+
+- **Swift Package Manager (SPM)**: [Installation Guide](/sdk/ios/installation#swift-package-manager)
+- **CocoaPods**: [Installation Guide](/sdk/ios/installation#cocoapods)
+
+### 2. Choose Your Payment Method
+
+| Payment Method | Description | SwiftUI Support | UIKit Support |
+|----------------|-------------|-----------------|---------------|
+| [Credit Card](/sdk/ios/credit-card-integration) | Accept Visa, Mastercard, Mada, and AMEX payments | ✅ Built-in `CreditCardView` | ✅ Built-in `CreditCardView` |
+| [Apple Pay](/sdk/ios/apple-pay-integration) | Seamless checkout with Face ID/Touch ID | ✅ `PKPaymentButton` wrapper | ✅ `PKPaymentButton` |
+| [STC Pay](/sdk/ios/stc-pay-integration) | Accept STC Pay mobile payments | ✅ Built-in `STCPayView` | ✅ Built-in `STCPayView` |
+
+---
+
+## Integration Guides
+
+### Credit Card Integration
+- [Basic Credit Card Integration](/sdk/ios/credit-card-integration) — Use the built-in `CreditCardView`
+- [Custom Credit Card UI](/sdk/ios/custom-credit-card-view) — Build your own card form
+
+### Apple Pay Integration
+- [Apple Pay Integration](/sdk/ios/apple-pay-integration) — Complete Apple Pay setup and integration
+
+### STC Pay Integration
+- [STC Pay Integration](/sdk/ios/stc-pay-integration) — Complete STC Pay setup and integration
+- [Custom STC Pay UI](/sdk/ios/custom-stc-pay) — Build your own STC Pay form
+
+---
+
+## Testing & Development
+
+- [Test Cards](/sdk/ios/test-cards) — Test card numbers for sandbox testing
+- [Testing Guide](/sdk/ios/testing) — Comprehensive testing instructions
+
+---
+
+## API Reference
+
+- [PaymentRequest](/sdk/ios/sdks#paymentrequest) — Payment request configuration
+- [PaymentResult](/sdk/ios/sdks#paymentresult) — Payment result handling
+- [ApiPayment](/sdk/ios/sdks#apipayment) — Payment object reference
+- [MoyasarError](/sdk/ios/sdks#moyasarerror) — Error handling reference
+
+---
+
+## Common Tasks
+
+### "How do I integrate credit card payments in SwiftUI?"
+→ See [Credit Card Integration - SwiftUI Section](/sdk/ios/credit-card-integration#step-2-add-the-credit-card-view)
+
+### "How do I add Apple Pay to my app?"
+→ See [Apple Pay Integration Guide](/sdk/ios/apple-pay-integration)
+
+### "How do I add STC Pay to my app?"
+→ See [STC Pay Integration Guide](/sdk/ios/stc-pay-integration)
+
+### "How do I test my integration?"
+→ See [Testing Guide](/sdk/ios/testing) and [Test Cards](/sdk/ios/test-cards)
+
+### "How do I build a custom payment UI?"
+→ See [Custom Credit Card UI](/sdk/ios/custom-credit-card-view) or [Custom STC Pay UI](/sdk/ios/custom-stc-pay)
+
+---
+
+## Need Help?
+
+- [Moyasar Dashboard](https://dashboard.moyasar.com)
+- [Support](https://moyasar.com/support)
+- [API Documentation](https://moyasar.com/docs/api)

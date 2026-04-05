@@ -1,6 +1,9 @@
 ---
-title: Apple Pay Payments Integration
+title: Apple Pay Integration
 sidebar_position: 3
+description: Learn how to integrate Apple Pay payments in SwiftUI and UIKit using Moyasar SDK
+keywords: Apple Pay, SwiftUI, UIKit, payment integration, PKPayment, iOS SDK, Moyasar, Face ID, Touch ID
+tags: [apple-pay, swiftui, uikit, payment, integration]
 ---
 
 import Tabs from '@theme/Tabs';
@@ -9,6 +12,10 @@ import TabItem from '@theme/TabItem';
 # Apple Pay Integration
 
 Enable Apple Pay payments for a seamless checkout experience using Face ID or Touch ID.
+
+> **SwiftUI Quick Start:** Jump directly to the [SwiftUI Integration Section](#swiftui-integration) for a complete SwiftUI example.
+> 
+> **UIKit Quick Start:** Jump directly to the [UIKit Integration Section](#uikit-integration) for a complete UIKit example.
 
 ---
 
@@ -238,7 +245,9 @@ func paymentAuthorizationControllerDidFinish(_ controller: PKPaymentAuthorizatio
 ## Step 7: Use the Handler in Your App
 
 <Tabs>
-  <TabItem value="swiftui" label="SwiftUI">
+  <TabItem value="swiftui" label="SwiftUI" id="swiftui-integration">
+
+### SwiftUI Integration
 
 First, create the `ApplePayButton` wrapper — a SwiftUI wrapper around Apple's `PKPaymentButton`:
 
@@ -280,7 +289,7 @@ struct ContentView: View {
     
     func presentApplePay() {
         do {
-            // createPaymentRequest() is defined in the Basic Integration guide
+            // createPaymentRequest() is defined in the Credit Card Integration guide
             handler = try ApplePayPaymentHandler(paymentRequest: createPaymentRequest())
             handler?.present()
         } catch {
@@ -291,7 +300,9 @@ struct ContentView: View {
 ```
 
   </TabItem>
-  <TabItem value="uikit" label="UIKit">
+  <TabItem value="uikit" label="UIKit" id="uikit-integration">
+
+### UIKit Integration
 
 ```swift
 import UIKit
@@ -321,7 +332,7 @@ class PaymentViewController: UIViewController {
     
     func presentApplePay() {
         do {
-            // createPaymentRequest() is defined in the Basic Integration guide
+            // createPaymentRequest() is defined in the Credit Card Integration guide
             handler = try ApplePayPaymentHandler(paymentRequest: createPaymentRequest())
             handler?.present()
         } catch {
@@ -359,6 +370,7 @@ class PaymentViewController: UIViewController {
 
 ## Next Steps
 
-- [Testing Apple Pay](/sdk/ios/testing) — Test with real cards in sandbox
+- [Credit Card Integration](/sdk/ios/credit-card-integration) — Add credit card payments
 - [STC Pay Integration](/sdk/ios/stc-pay-integration) — Add STC Pay support
+- [Testing Guide](/sdk/ios/testing) — Test with real cards in sandbox
 - [Payment Status Reference](/api/payments/payment-status-reference) — Understand payment statuses

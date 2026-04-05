@@ -1,6 +1,9 @@
 ---
 title: STC Pay Integration
 sidebar_position: 4
+description: Learn how to integrate STC Pay payments in SwiftUI and UIKit using Moyasar SDK
+keywords: STC Pay, SwiftUI, UIKit, payment integration, mobile payment, iOS SDK, Moyasar, OTP
+tags: [stc-pay, swiftui, uikit, payment, integration]
 ---
 
 import Tabs from '@theme/Tabs';
@@ -9,6 +12,10 @@ import TabItem from '@theme/TabItem';
 # STC Pay Integration
 
 Accept payments via STC Pay using the SDK's built-in `STCPayView`.
+
+> **SwiftUI Quick Start:** Jump directly to the [SwiftUI Integration Section](#swiftui-integration) for a complete SwiftUI example.
+> 
+> **UIKit Quick Start:** Jump directly to the [UIKit Integration Section](#uikit-integration) for a complete UIKit example.
 
 ---
 
@@ -44,7 +51,9 @@ func createSTCPaymentRequest() -> PaymentRequest {
 ## Step 2: Add the STC Pay View
 
 <Tabs>
-  <TabItem value="swiftui" label="SwiftUI">
+  <TabItem value="swiftui" label="SwiftUI" id="swiftui-integration">
+
+### SwiftUI Integration
 
 ```swift
 import SwiftUI
@@ -67,11 +76,37 @@ struct STCPayScreen: View {
             handleSTCError(error)
         }
     }
+    
+    func handleSTCPayment(_ payment: ApiPayment) {
+        switch payment.status {
+        case .paid:
+            print("STC Pay successful: \(payment.id)")
+            // Navigate to success screen
+        case .failed:
+            print("STC Pay failed")
+            // Show error to user
+        default:
+            print("STC Pay status: \(payment.status)")
+        }
+    }
+    
+    func handleSTCError(_ error: MoyasarError) {
+        switch error {
+        case .apiError(let apiError):
+            print("API error: \(apiError.message ?? "Unknown")")
+        case .networkError:
+            print("Network connection failed")
+        default:
+            print("STC Pay error: \(error)")
+        }
+    }
 }
 ```
 
   </TabItem>
-  <TabItem value="uikit" label="UIKit">
+  <TabItem value="uikit" label="UIKit" id="uikit-integration">
+
+### UIKit Integration
 
 ```swift
 import UIKit
@@ -115,41 +150,35 @@ class STCPayViewController: UIViewController {
             handleSTCError(error)
         }
     }
+    
+    func handleSTCPayment(_ payment: ApiPayment) {
+        switch payment.status {
+        case .paid:
+            print("STC Pay successful: \(payment.id)")
+            // Navigate to success screen
+        case .failed:
+            print("STC Pay failed")
+            // Show error to user
+        default:
+            print("STC Pay status: \(payment.status)")
+        }
+    }
+    
+    func handleSTCError(_ error: MoyasarError) {
+        switch error {
+        case .apiError(let apiError):
+            print("API error: \(apiError.message ?? "Unknown")")
+        case .networkError:
+            print("Network connection failed")
+        default:
+            print("STC Pay error: \(error)")
+        }
+    }
 }
 ```
 
   </TabItem>
 </Tabs>
-
----
-
-## Step 3: Handle the Payment Result
-
-```swift
-func handleSTCPayment(_ payment: ApiPayment) {
-    switch payment.status {
-    case .paid:
-        print("STC Pay successful: \(payment.id)")
-        // Navigate to success screen
-    case .failed:
-        print("STC Pay failed")
-        // Show error to user
-    default:
-        print("STC Pay status: \(payment.status)")
-    }
-}
-
-func handleSTCError(_ error: MoyasarError) {
-    switch error {
-    case .apiError(let apiError):
-        print("API error: \(apiError.message ?? "Unknown")")
-    case .networkError:
-        print("Network connection failed")
-    default:
-        print("STC Pay error: \(error)")
-    }
-}
-```
 
 ---
 
@@ -164,8 +193,30 @@ The `STCPayView` handles this flow automatically. For custom UI implementation, 
 
 ---
 
+## Important Notes
+
+- **Physical device required** — STC Pay requires a real iOS device for OTP verification
+- **Saudi phone number** — Users must have a Saudi phone number registered with STC Pay
+- **Network connection** — Ensure stable internet connection for OTP delivery
+- **Test environment** — Use `pk_test_` keys for sandbox testing
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| OTP not received | Verify the phone number is registered with STC Pay and has network coverage |
+| Payment fails with network error | Check internet connection and retry |
+| Invalid phone number format | Ensure the phone number is in the correct Saudi format (05XXXXXXXX) |
+| STC Pay not available | Ensure STC Pay is enabled on your Moyasar account |
+
+---
+
 ## Next Steps
 
+- [Credit Card Integration](/sdk/ios/credit-card-integration) — Add credit card payments
+- [Apple Pay Integration](/sdk/ios/apple-pay-integration) — Add Apple Pay support
 - [Customizing STC Pay](/sdk/ios/custom-stc-pay) — Build your own STC Pay UI
 - [Testing Guide](/sdk/ios/testing) — Test with sandbox OTP codes
 - [Payment Status Reference](/api/payments/payment-status-reference) — Understand payment statuses

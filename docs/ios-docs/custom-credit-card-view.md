@@ -1,5 +1,5 @@
 ---
-title: Customizing Credit Card View
+title: Custom Credit Card UI
 sidebar_position: 5
 ---
 
