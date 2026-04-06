@@ -24,7 +24,7 @@ app.use(express.json());
 // ============================================================
 const OLLAMA_URL = 'http://localhost:11434/api';
 const EMBEDDING_MODEL = 'nomic-embed-text';
-const LLM_MODEL = 'qwen2.5:3b';
+const LLM_MODEL = 'qwen2.5:14b';
 const TOP_K_RESULTS = 12;
 const MIN_CHUNK_LENGTH = 30;
 
@@ -119,30 +119,74 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 // ============================================================
-// 1. DYNAMIC INDEXING — No Hardcoded Platforms
+// MDX CLEANER — Strip JSX/MDX syntax before chunking
 // ============================================================
 
 /**
- * Extract platform from a file path under docs/.
- * Convention: docs/<platform>-docs/  →  platform = "ios"
- * Also handles: docs/<platform>/      →  platform = "flutter"
- * Falls back to "general" if no platform folder is detected.
+ * Converts MDX content to clean Markdown that the chunker can handle.
+ *
+ * What it removes/unwraps:
+ * - import statements (import Tabs from '...')
+ * - JSX component tags: <Tabs>, </Tabs>, <TabItem ...>, </TabItem>
+ * - Frontmatter (--- ... ---)
+ * - HTML-style JSX attributes tags like <span className=...>
+ *
+ * What it KEEPS (critical):
+ * - All markdown headers (# ## ###)
+ * - All fenced code blocks (``` ... ```)
+ * - All markdown tables
+ * - All text content inside TabItem blocks
  */
+function cleanMdxContent(content) {
+  let cleaned = content;
+
+  // 1. Remove frontmatter (--- ... ---)
+  cleaned = cleaned.replace(/^---[\s\S]*?---\n/m, '');
+
+  // 2. Remove import statements
+  cleaned = cleaned.replace(/^import\s+.*from\s+['"].*['"]\s*;?\s*\n/gm, '');
+
+  // 3. Remove JSX span/badge tags (single-line JSX elements)
+  cleaned = cleaned.replace(/<span[^>]*>.*?<\/span>\s*\n?/g, '');
+
+  // 4. Unwrap <TabItem> blocks — extract the label as a heading + keep content
+  // Handles both self-contained and multi-line TabItem blocks
+  cleaned = cleaned.replace(
+    /<TabItem\s+[^>]*label="([^"]+)"[^>]*>([\s\S]*?)<\/TabItem>/g,
+    (match, label, innerContent) => {
+      // Add label as bold marker so context is preserved, then the content
+      return `\n**${label}:**\n${innerContent.trim()}\n`;
+    }
+  );
+
+  // 5. Remove remaining <Tabs> and </Tabs> wrapper tags
+  cleaned = cleaned.replace(/<\/?Tabs[^>]*>\s*\n?/g, '');
+
+  // 6. Remove any remaining JSX-style opening/closing tags (catch-all)
+  // But do NOT remove markdown code block content
+  cleaned = cleaned.replace(/^<[A-Z][^>]*\/>\s*\n?/gm, '');  // self-closing JSX
+  cleaned = cleaned.replace(/^<\/[A-Z][^>]*>\s*\n?/gm, '');  // closing JSX tags
+  cleaned = cleaned.replace(/^<[A-Z][^>]*>\s*\n?/gm, '');    // opening JSX tags
+
+  // 7. Collapse excessive blank lines (max 2 consecutive)
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned.trim();
+}
+
+// ============================================================
+// 1. DYNAMIC INDEXING — No Hardcoded Platforms
+// ============================================================
+
 function extractPlatformFromPath(filePath) {
   const normalized = filePath.replace(/\\/g, '/');
-  // Match docs/<name>-docs/
   const match = normalized.match(/docs\/([^/]+)-docs\//);
   if (match) return match[1].toLowerCase();
-  // Match docs/<name>/
   const match2 = normalized.match(/docs\/([^/]+)\//);
   if (match2 && !match2[1].startsWith('.')) return match2[1].toLowerCase();
   return 'general';
 }
 
-/**
- * Smart content chunking — splits docs/code into retrievable segments.
- * Attaches dynamically extracted platform as metadata.
- */
 function smartChunk(content, filePath) {
   const chunks = [];
   const ext = path.extname(filePath);
@@ -151,20 +195,38 @@ function smartChunk(content, filePath) {
   const fileHeader = `<!-- Source: ${fileName} | Platform: ${platform} -->\n`;
 
   if (ext === '.md' || ext === '.mdx') {
+    // ✅ FIX: Clean MDX/JSX syntax BEFORE chunking
+    const cleanedContent = (ext === '.mdx') ? cleanMdxContent(content) : content;
+
     // Split by markdown headers (h1-h3)
-    const sections = content.split(/(?=^#{1,3}\s)/m);
-    for (const section of sections) {
-      const trimmed = section.trim();
-      if (trimmed.length > MIN_CHUNK_LENGTH) {
-        chunks.push({ text: fileHeader + trimmed, platform });
+    const sections = cleanedContent.split(/(?=^#{1,3}\s)/m);
+
+    // ✅ FIX: Merge small chunks with the next chunk to prevent orphan headers
+    const MERGE_THRESHOLD = 300; // chars
+    const filteredSections = [];
+    for (let i = 0; i < sections.length; i++) {
+      const trimmed = sections[i].trim();
+      if (trimmed.length <= MIN_CHUNK_LENGTH) continue;
+
+      // If this section is too small, merge with the next section
+      if (trimmed.length < MERGE_THRESHOLD && i + 1 < sections.length) {
+        const nextTrimmed = sections[i + 1].trim();
+        if (nextTrimmed.length > MIN_CHUNK_LENGTH) {
+          filteredSections.push(trimmed + '\n\n' + nextTrimmed);
+          i++; // skip next section since we merged it
+          continue;
+        }
+      }
+      filteredSections.push(trimmed);
+    }
+
+    for (const section of filteredSections) {
+      if (section.length > MIN_CHUNK_LENGTH) {
+        chunks.push({ text: fileHeader + section, platform });
       }
     }
-    // Also index full file if small enough for broader context
-    if (content.length < 15000) {
-      chunks.push({ text: fileHeader + content, platform });
-    }
+
   } else if (['.swift', '.kt', '.dart', '.js', '.ts'].includes(ext)) {
-    // Code files: split by top-level declarations
     const lines = content.split('\n');
     let currentChunk = [];
     let braceCount = 0;
@@ -215,19 +277,11 @@ function smartChunk(content, filePath) {
         chunks.push({ text: chunkText, platform });
       }
     }
-
-    if (content.length < 5000) {
-      chunks.push({ text: codeHeader + content, platform });
-    }
   }
 
   return chunks;
 }
 
-/**
- * Discover all platform folders under docs/ and index every file.
- * Platform is dynamically extracted — nothing is hardcoded.
- */
 async function indexDocs() {
   vectorDB = [];
   const docsRoot = path.join(__dirname, 'docs');
@@ -237,7 +291,6 @@ async function indexDocs() {
     return;
   }
 
-  // Auto-discover platform folders
   const platformDirs = fs.readdirSync(docsRoot)
     .filter(d => {
       const fullPath = path.join(docsRoot, d);
@@ -247,7 +300,6 @@ async function indexDocs() {
 
   console.log(`📂 Discovered ${platformDirs.length} platform folder(s): ${platformDirs.map(d => d.name).join(', ')}`);
 
-  // Collect all indexable files recursively
   const allFiles = [];
   function collectFiles(dirPath) {
     const entries = fs.readdirSync(dirPath);
@@ -268,7 +320,6 @@ async function indexDocs() {
 
   console.log(`📄 Total files to index: ${allFiles.length}`);
 
-  // Verify embedding model is available
   console.log(`Testing embedding model: ${EMBEDDING_MODEL}...`);
   const testEmbedding = await generateEmbedding('test');
   if (!testEmbedding) {
@@ -308,7 +359,6 @@ async function indexDocs() {
     }
   }
 
-  // Summary
   const platformSummary = {};
   vectorDB.forEach(item => {
     const p = item.metadata.platform;
@@ -326,15 +376,31 @@ async function indexDocs() {
 }
 
 // ============================================================
-// 2. LLM INTENT ROUTER — Semantic Extraction (No Regex)
+// 2. LLM INTENT ROUTER
 // ============================================================
 
-/**
- * Uses the LLM to analyze the user's query and extract structured intent.
- * Returns: { platform: "ios" | "flutter" | "android" | "general" }
- *
- * This replaces ALL hardcoded regex/platform-detection functions.
- */
+function quickPlatformDetect(query) {
+  const lower = query.toLowerCase();
+
+  const unsupportedKeywords = ['react native', 'reactnative', 'stripe', 'razorpay', 'paypal'];
+  if (unsupportedKeywords.some(kw => lower.includes(kw))) {
+    return 'general';
+  }
+
+  const platformKeywords = {
+    ios: ['ios', 'swift', 'swiftui', 'uikit', 'xcode', 'cocoapods', 'iphone', 'ipad', 'xcframework', 'cocoapod'],
+    flutter: ['flutter', 'dart', 'pubspec', 'flutter sdk', 'dartlang'],
+    android: ['android', 'kotlin', 'java', 'gradle', 'jetpack compose', 'android studio', 'aar', 'jetpack']
+  };
+
+  for (const [platform, keywords] of Object.entries(platformKeywords)) {
+    if (keywords.some(kw => lower.includes(kw))) {
+      return platform;
+    }
+  }
+  return 'general';
+}
+
 async function analyzeIntent(userQuery) {
   const prompt = `You are an intent router for the Moyasar payment SDK documentation system.
 
@@ -351,7 +417,7 @@ Rules:
 - "ios" if the query mentions iOS, Swift, SwiftUI, UIKit, Xcode, CocoaPods, iPhone, iPad, or Apple-specific concepts
 - "flutter" if the query mentions Flutter, Dart, widgets, pubspec, or Flutter-specific concepts
 - "android" if the query mentions Android, Kotlin, Java, Gradle, Jetpack Compose, or Android-specific concepts
-- "general" if the query is platform-agnostic (e.g., about API endpoints, payment flows, authentication, or general concepts that apply to all platforms)
+- "general" if the query is platform-agnostic
 
 Return ONLY the JSON object.`;
 
@@ -370,38 +436,40 @@ Return ONLY the JSON object.`;
       rawText = response;
     }
 
-    // Extract JSON from the response
     const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       const platform = (parsed.platform || 'general').toLowerCase();
 
-      // Validate platform is one of the allowed values
       const validPlatforms = ['ios', 'flutter', 'android', 'general'];
-      const detectedPlatform = validPlatforms.includes(platform) ? platform : 'general';
+      let detectedPlatform = validPlatforms.includes(platform) ? platform : 'general';
+
+      const keywordResult = quickPlatformDetect(userQuery);
+      if (keywordResult === 'general' && detectedPlatform !== 'general') {
+        console.log(`🧠 LLM detected "${detectedPlatform}" but keyword check suggests unsupported platform — overriding to 'general'`);
+        detectedPlatform = 'general';
+      }
 
       console.log(`🧠 LLM Intent Router detected platform: "${detectedPlatform}"`);
       return { platform: detectedPlatform };
     }
   } catch (error) {
-    console.warn('⚠️ LLM Intent Router failed, falling back to "general":', error.message);
+    console.warn('⚠️ LLM Intent Router failed, falling back to keyword detection:', error.message);
   }
 
-  // Safe fallback
+  const keywordPlatform = quickPlatformDetect(userQuery);
+  if (keywordPlatform !== 'general') {
+    console.log(`🔍 Keyword fallback detected platform: "${keywordPlatform}"`);
+    return { platform: keywordPlatform };
+  }
+
   return { platform: 'general' };
 }
 
 // ============================================================
-// 3. FILTERED RETRIEVAL — Platform Metadata Filter
+// 3. FILTERED RETRIEVAL
 // ============================================================
 
-/**
- * Search the Vector DB using the platform from the Intent Router
- as a strict metadata filter.
- *
- * If platform is "general", search across ALL platforms.
- * Otherwise, ONLY return chunks where metadata.platform matches.
- */
 async function searchVectorDB(userQuery, intent, topK = TOP_K_RESULTS) {
   const questionEmbedding = await generateEmbedding(userQuery);
   if (!questionEmbedding) {
@@ -411,48 +479,34 @@ async function searchVectorDB(userQuery, intent, topK = TOP_K_RESULTS) {
 
   const targetPlatform = intent.platform;
 
-  // Step 1: Filter by platform metadata (strict filter)
-  const candidates = targetPlatform === 'general'
-    ? vectorDB
-    : vectorDB.filter(item => item.metadata.platform === targetPlatform);
-
-  if (candidates.length === 0) {
-    console.log(`⚠️ No chunks found for platform "${targetPlatform}". Expanding to all platforms.`);
-    // Fallback: search all platforms if the target platform has no results
-    return searchAllPlatforms(userQuery, questionEmbedding, topK);
+  if (targetPlatform === 'general') {
+    console.log(`⛔ Platform is 'general' — asking user for clarification.`);
+    return null;
   }
 
-  // Step 2: Score filtered candidates by cosine similarity
+  const candidates = vectorDB.filter(item => item.metadata.platform === targetPlatform);
+
+  if (candidates.length === 0) {
+    console.log(`⚠️ No chunks found for platform "${targetPlatform}".`);
+    return [];
+  }
+
   const scored = candidates.map(item => {
     const score = cosineSimilarity(questionEmbedding, item.embedding);
     return { ...item, score };
   });
 
-  // Step 3: Sort and return top-K
-  scored.sort((a, b) => b.score - a.score);
-  const results = scored.slice(0, topK);
+  const thresholdFiltered = scored.filter(item => item.score >= 0.35);
 
-  console.log(`📊 Retrieved ${results.length} results (platform filter: "${targetPlatform}")`);
-  results.forEach((r, i) => {
-    console.log(`  ${i + 1}. [${r.metadata.platform}] ${r.fileName} (score: ${r.score.toFixed(4)})`);
-  });
+  if (thresholdFiltered.length === 0) {
+    console.log(`⚠️ No chunks meet the similarity threshold (0.35). Highest score: ${scored[0]?.score.toFixed(4) || 'N/A'}`);
+    return [];
+  }
 
-  return results;
-}
+  thresholdFiltered.sort((a, b) => b.score - a.score);
+  const results = thresholdFiltered.slice(0, topK);
 
-/**
- * Fallback: search across ALL platforms when target platform has no chunks.
- */
-function searchAllPlatforms(userQuery, questionEmbedding, topK) {
-  const scored = vectorDB.map(item => {
-    const score = cosineSimilarity(questionEmbedding, item.embedding);
-    return { ...item, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  const results = scored.slice(0, topK);
-
-  console.log(`📊 Retrieved ${results.length} results (all platforms fallback)`);
+  console.log(`📊 Retrieved ${results.length} results (platform filter: "${targetPlatform}", threshold: 0.35)`);
   results.forEach((r, i) => {
     console.log(`  ${i + 1}. [${r.metadata.platform}] ${r.fileName} (score: ${r.score.toFixed(4)})`);
   });
@@ -461,16 +515,10 @@ function searchAllPlatforms(userQuery, questionEmbedding, topK) {
 }
 
 // ============================================================
-// 4. DYNAMIC GENERATION — Terminology-Aware Prompt
+// 4. DYNAMIC GENERATION
 // ============================================================
 
-/**
- * Build the final LLM prompt that instructs the model to answer
- * using ONLY the terminology and naming conventions found in
- * the retrieved chunks.
- */
 function buildGenerationPrompt(userQuery, retrievedChunks, intent) {
-  // Build context from retrieved chunks
   let context = '';
   for (let i = 0; i < retrievedChunks.length; i++) {
     const chunk = retrievedChunks[i];
@@ -485,6 +533,18 @@ function buildGenerationPrompt(userQuery, retrievedChunks, intent) {
 
   return `You are the Moyasar AI Co-Pilot — an expert technical assistant for the Moyasar payment SDK.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NEGATIVE CONSTRAINTS (CRITICAL — NO EXCEPTIONS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. If the retrieved documentation chunks do NOT contain the specific method, class, or property name that the user is asking about, you MUST explicitly state: "The retrieved documentation does not contain information about [specific thing requested]."
+2. DO NOT guess or invent API names, method signatures, or code patterns that are not present in the retrieved context.
+3. NEVER use your internal training data to generate code syntax. Only use code that appears in the retrieved documentation.
+4. NEVER mix terminology from different platforms (e.g., do not combine iOS class names with Flutter concepts).
+5. If you cannot answer the question using ONLY the retrieved chunks, say so clearly instead of providing a potentially incorrect answer.
+6. DO NOT use code patterns like "paymentCompletionHandler", ".success/.failure", or "CreditCardView(paymentRequest:)" — these are NOT in the documentation. The correct pattern is: CreditCardView(request: callback:) with PaymentResult cases: .completed, .failed, .canceled, .saveOnlyToken.
+7. For UIKit integration, you MUST use UIHostingController to wrap the SwiftUI CreditCardView — do NOT add it directly as a subview.
+
 ${platformInstruction}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -495,10 +555,12 @@ You MUST answer using ONLY the terminology, class names, method names, and namin
 
 - If the docs use "PaymentConfig", use "PaymentConfig".
 - If the docs use "PaymentRequest", use "PaymentRequest".
-- If the docs use "MoyasarSDK", use "MoyasarSDK".
+- If the docs use "MoyasarSdk", use "MoyasarSdk".
 - NEVER substitute terminology from other platforms.
 - NEVER invent API names, class names, or method names not present in the context.
 - Adapt your answer to match the exact naming conventions used in the retrieved chunks.
+- The CreditCardView initializer is: CreditCardView(request: createPaymentRequest()) { result in handlePaymentResult(result) }
+- PaymentResult cases are: .completed(ApiPayment), .failed(MoyasarError), .canceled, .saveOnlyToken(ApiToken)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RETRIEVED DOCUMENTATION
@@ -549,26 +611,29 @@ async function callLLM(prompt, maxTokens = 2048, temperature = 0.1) {
 }
 
 // ============================================================
-// MAIN PIPELINE — Dynamic RAG
+// MAIN PIPELINE
 // ============================================================
 async function answerQuestion(question) {
   console.log(`\n⚡ Dynamic RAG Pipeline starting...`);
   console.log(`📝 Question: ${question}`);
 
-  // Step 1: LLM Intent Router (semantic extraction)
   const intent = await analyzeIntent(question);
-
-  // Step 2: Filtered Retrieval (platform metadata filter)
   const retrievedChunks = await searchVectorDB(question, intent);
+
+  if (retrievedChunks === null) {
+    return {
+      answer: `I need to know which platform you're asking about to provide an accurate answer. Please specify one of: **iOS** (Swift/SwiftUI), **Flutter** (Dart), or **Android** (Kotlin/Java).`,
+      metadata: { intent, needsClarification: true },
+    };
+  }
 
   if (retrievedChunks.length === 0) {
     return {
-      answer: 'No relevant documentation found for your question. Please ensure the documentation covers the requested topic.',
+      answer: 'No relevant documentation found for your question. The retrieved documentation does not contain information matching your query with sufficient confidence. Please try rephrasing your question or check if the topic is covered in the SDK documentation.',
       metadata: { intent, resultsCount: 0 },
     };
   }
 
-  // Step 3: Dynamic Generation (terminology-aware prompt)
   const prompt = buildGenerationPrompt(question, retrievedChunks, intent);
   console.log(`🤖 Calling LLM (prompt: ${prompt.length} chars)...`);
   const answer = await callLLM(prompt, 3072, 0.15);
@@ -596,7 +661,7 @@ async function answerQuestion(question) {
 // Response Cache
 // ============================================================
 const responseCache = new Map();
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL = 30 * 60 * 1000;
 const CACHE_MAX_SIZE = 500;
 
 function hashQuestion(question) {
@@ -637,7 +702,6 @@ function getCacheStats() {
 // API ENDPOINTS
 // ============================================================
 
-// Main ask endpoint
 app.post('/ask', async (req, res) => {
   const { question } = req.body;
   console.log('\n========================================');
@@ -649,7 +713,6 @@ app.post('/ask', async (req, res) => {
   }
 
   try {
-    // Check cache
     const cached = getCachedAnswer(question);
     if (cached) {
       console.log(`⚡ Cache HIT! (${cached.hitCount} hits)`);
@@ -659,8 +722,9 @@ app.post('/ask', async (req, res) => {
     console.log('🔄 Cache MISS - processing...');
     const result = await answerQuestion(question);
 
-    // Cache the result
-    setCachedAnswer(question, result.answer);
+    if (!result.metadata?.needsClarification) {
+      setCachedAnswer(question, result.answer);
+    }
 
     res.json({ answer: result.answer, metadata: { ...result.metadata, cached: false } });
   } catch (error) {
@@ -669,7 +733,6 @@ app.post('/ask', async (req, res) => {
   }
 });
 
-// Streaming endpoint
 app.post('/ask/stream', async (req, res) => {
   const { question } = req.body;
 
@@ -684,7 +747,6 @@ app.post('/ask/stream', async (req, res) => {
   };
 
   try {
-    // Check cache
     const cached = getCachedAnswer(question);
     if (cached) {
       sendEvent('cached', { hitCount: cached.hitCount });
@@ -695,20 +757,24 @@ app.post('/ask/stream', async (req, res) => {
 
     sendEvent('status', { message: '🔍 Analyzing intent...' });
 
-    // Step 1: LLM Intent Router
     const intent = await analyzeIntent(question);
 
     sendEvent('status', { message: '📚 Searching documentation...' });
 
-    // Step 2: Filtered Retrieval
     const results = await searchVectorDB(question, intent);
-    if (results.length === 0) {
-      sendEvent('chunk', { text: 'No relevant documentation found.' });
+
+    if (results === null) {
+      sendEvent('chunk', { text: 'Please specify your platform: iOS (Swift/SwiftUI), Flutter (Dart), or Android (Kotlin/Java).' });
       sendEvent('done', {});
       return res.end();
     }
 
-    // Step 3: Build prompt & stream
+    if (results.length === 0) {
+      sendEvent('chunk', { text: 'No relevant documentation found. Please try rephrasing your question.' });
+      sendEvent('done', {});
+      return res.end();
+    }
+
     const prompt = buildGenerationPrompt(question, results, intent);
 
     sendEvent('status', { message: '🤖 Generating answer...' });
@@ -747,7 +813,6 @@ app.post('/ask/stream', async (req, res) => {
   }
 });
 
-// Status endpoint
 app.get('/status', (req, res) => {
   const platformCounts = {};
   vectorDB.forEach(item => {
@@ -764,21 +829,18 @@ app.get('/status', (req, res) => {
   });
 });
 
-// Cache endpoints
 app.get('/cache/stats', (req, res) => res.json(getCacheStats()));
 app.delete('/cache/clear', (req, res) => {
   responseCache.clear();
   res.json({ message: 'Cache cleared' });
 });
 
-// Re-index endpoint
 app.post('/reindex', async (req, res) => {
   console.log('🔄 Re-indexing triggered...');
   await indexDocs();
   res.json({ message: 'Re-indexing complete', totalChunks: vectorDB.length });
 });
 
-// Serve HTML
 app.get('/', (req, res) => {
   const htmlPath = path.join(process.cwd(), 'index.html');
   if (fs.existsSync(htmlPath)) res.sendFile(htmlPath);
