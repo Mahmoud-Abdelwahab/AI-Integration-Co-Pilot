@@ -1,0 +1,21 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+	precomposeunicode = true
+[remote "origin"]
+	url = https://github.com/Mahmoud-Abdelwahab/AI-Integration-Co-Pilot
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+	remote = origin
+	merge = refs/heads/master
+[branch "Smart-synthesis-engine"]
+	remote = origin
+	merge = refs/heads/Smart-synthesis-engine
+	vscode-merge-base = origin/master
+[branch "Multi-Query-Retrieval"]
+	remote = origin
+	merge = refs/heads/Multi-Query-Retrieval
+	vscode-merge-base = origin/Smart-synthesis-engine

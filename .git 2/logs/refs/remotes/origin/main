@@ -1,0 +1,2 @@
+0000000000000000000000000000000000000000 edddedefb4b4b55d88fe7aa846f1d262754ded00 Mahmoud abdelwahab <mahmoud.elziany@gmail.com> 1775267263 +0400	fetch --prune --all --verbose --progress: storing head
+edddedefb4b4b55d88fe7aa846f1d262754ded00 88159b53d8d1193ea485530af7a4da70697a7ed2 Mahmoud abdelwahab <mahmoud.elziany@gmail.com> 1775279453 +0400	pull --rebase=false origin --prune --verbose --progress: fast-forward
