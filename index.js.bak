@@ -3,7 +3,6 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const CONFIG = require('./config');
 
 const app = express();
 
@@ -19,6 +18,15 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// ============================================================
+// Configuration
+// ============================================================
+const OLLAMA_URL = 'http://localhost:11434/api';
+const EMBEDDING_MODEL = 'nomic-embed-text';
+const LLM_MODEL = 'qwen2.5:14b';
+const TOP_K_RESULTS = 12;
+const MIN_CHUNK_LENGTH = 30;
 
 // ============================================================
 // Vector DB (in-memory)
@@ -86,8 +94,8 @@ function makeHttpStream(url, data, onChunk) {
 // ============================================================
 async function generateEmbedding(text) {
   try {
-    const response = await makeHttpPost(`${CONFIG.OLLAMA_URL}/embeddings`, {
-      model: CONFIG.EMBEDDING_MODEL,
+    const response = await makeHttpPost(`${OLLAMA_URL}/embeddings`, {
+      model: EMBEDDING_MODEL,
       prompt: text,
     });
     if (response?.embedding && Array.isArray(response.embedding)) {
@@ -167,35 +175,6 @@ function cleanMdxContent(content) {
 }
 
 // ============================================================
-// STRUCTURED DATA EXTRACTION & CHUNK DEDUPLICATION
-// ============================================================
-
-function hashChunk(text) {
-  return crypto.createHash('md5').update(text).digest('hex');
-}
-
-function extractStructuredData(rawText, platform) {
-  const lines = rawText.split('\n');
-  let title = '';
-  const steps = [];
-  let inCode = false;
-
-  for (const line of lines) {
-    if (line.startsWith('```')) { inCode = !inCode; continue; }
-    if (inCode) continue;
-    if (!title && line.startsWith('#')) {
-      title = line.replace(/^#+\s*/, '').trim();
-    }
-    if (line.trim().startsWith('- ') || line.trim().match(/^\d+\.\s/)) {
-      const step = line.replace(/^[\s]*[-\d.]+\s*/, '').trim();
-      if (step.length > 5) steps.push(step);
-    }
-  }
-
-  return { title: title || '', steps, content: rawText, platform };
-}
-
-// ============================================================
 // 1. DYNAMIC INDEXING — No Hardcoded Platforms
 // ============================================================
 
@@ -222,16 +201,19 @@ function smartChunk(content, filePath) {
     // Split by markdown headers (h1-h3)
     const sections = cleanedContent.split(/(?=^#{1,3}\s)/m);
 
+    // ✅ FIX: Merge small chunks with the next chunk to prevent orphan headers
+    const MERGE_THRESHOLD = 300; // chars
     const filteredSections = [];
     for (let i = 0; i < sections.length; i++) {
       const trimmed = sections[i].trim();
-      if (trimmed.length <= CONFIG.MIN_CHUNK_LENGTH) continue;
+      if (trimmed.length <= MIN_CHUNK_LENGTH) continue;
 
-      if (trimmed.length < CONFIG.MERGE_THRESHOLD && i + 1 < sections.length) {
+      // If this section is too small, merge with the next section
+      if (trimmed.length < MERGE_THRESHOLD && i + 1 < sections.length) {
         const nextTrimmed = sections[i + 1].trim();
-        if (nextTrimmed.length > CONFIG.MIN_CHUNK_LENGTH) {
+        if (nextTrimmed.length > MIN_CHUNK_LENGTH) {
           filteredSections.push(trimmed + '\n\n' + nextTrimmed);
-          i++;
+          i++; // skip next section since we merged it
           continue;
         }
       }
@@ -239,12 +221,12 @@ function smartChunk(content, filePath) {
     }
 
     for (const section of filteredSections) {
-      if (section.length > CONFIG.MIN_CHUNK_LENGTH) {
+      if (section.length > MIN_CHUNK_LENGTH) {
         chunks.push({ text: fileHeader + section, platform });
       }
     }
 
-  } else if (CONFIG.INDEXED_EXTENSIONS.filter(e => ['.swift', '.kt', '.dart', '.js', '.ts'].includes(e)).includes(ext)) {
+  } else if (['.swift', '.kt', '.dart', '.js', '.ts'].includes(ext)) {
     const lines = content.split('\n');
     let currentChunk = [];
     let braceCount = 0;
@@ -253,12 +235,20 @@ function smartChunk(content, filePath) {
 
     for (const line of lines) {
       const trimmed = line.trim();
-      const isDeclaration = CONFIG.CODE_DECLARATION_PATTERNS.some(p => trimmed.startsWith(p));
+      const isDeclaration =
+        trimmed.startsWith('func ') || trimmed.startsWith('public func ') || trimmed.startsWith('private func ') ||
+        trimmed.startsWith('class ') || trimmed.startsWith('public class ') ||
+        trimmed.startsWith('struct ') || trimmed.startsWith('public struct ') ||
+        trimmed.startsWith('enum ') || trimmed.startsWith('public enum ') ||
+        trimmed.startsWith('extension ') || trimmed.startsWith('init(') ||
+        trimmed.startsWith('fun ') || trimmed.startsWith('data class ') ||
+        trimmed.startsWith('Widget ') || trimmed.startsWith('void ') ||
+        trimmed.startsWith('export ') || trimmed.startsWith('const ') || trimmed.startsWith('function ');
 
       if (!chunkStarted && isDeclaration) {
         if (currentChunk.length > 0) {
           const chunkText = codeHeader + currentChunk.join('\n');
-          if (chunkText.trim().length > CONFIG.MIN_CHUNK_LENGTH) {
+          if (chunkText.trim().length > MIN_CHUNK_LENGTH) {
             chunks.push({ text: chunkText, platform });
           }
           currentChunk = [];
@@ -272,7 +262,7 @@ function smartChunk(content, filePath) {
 
       if (chunkStarted && braceCount <= 0 && currentChunk.length > 2) {
         const chunkText = codeHeader + currentChunk.join('\n');
-        if (chunkText.trim().length > CONFIG.MIN_CHUNK_LENGTH) {
+        if (chunkText.trim().length > MIN_CHUNK_LENGTH) {
           chunks.push({ text: chunkText, platform });
         }
         currentChunk = [];
@@ -283,7 +273,7 @@ function smartChunk(content, filePath) {
 
     if (currentChunk.length > 0) {
       const chunkText = codeHeader + currentChunk.join('\n');
-      if (chunkText.trim().length > CONFIG.MIN_CHUNK_LENGTH) {
+      if (chunkText.trim().length > MIN_CHUNK_LENGTH) {
         chunks.push({ text: chunkText, platform });
       }
     }
@@ -318,7 +308,7 @@ async function indexDocs() {
       const stat = fs.statSync(fullPath);
       if (stat.isDirectory()) {
         collectFiles(fullPath);
-      } else if (stat.isFile() && CONFIG.INDEXED_EXTENSIONS_REGEX.test(entry)) {
+      } else if (stat.isFile() && /\.(md|mdx|swift|kt|dart|js|ts)$/.test(entry)) {
         allFiles.push(fullPath);
       }
     }
@@ -330,18 +320,17 @@ async function indexDocs() {
 
   console.log(`📄 Total files to index: ${allFiles.length}`);
 
-  console.log(`Testing embedding model: ${CONFIG.EMBEDDING_MODEL}...`);
+  console.log(`Testing embedding model: ${EMBEDDING_MODEL}...`);
   const testEmbedding = await generateEmbedding('test');
   if (!testEmbedding) {
-    console.error(`\n❌ ERROR: Embedding model '${CONFIG.EMBEDDING_MODEL}' is not available!`);
-    console.error(`Please run: ollama pull ${CONFIG.EMBEDDING_MODEL}\n`);
+    console.error(`\n❌ ERROR: Embedding model '${EMBEDDING_MODEL}' is not available!`);
+    console.error(`Please run: ollama pull ${EMBEDDING_MODEL}\n`);
     return;
   }
   console.log(`✅ Embedding model working. Dimension: ${testEmbedding.length}`);
 
   let indexed = 0;
   let totalChunks = 0;
-  const seenHashes = new Set();
 
   for (const file of allFiles) {
     try {
@@ -351,22 +340,14 @@ async function indexDocs() {
       const fileName = path.basename(file);
 
       for (const chunk of chunks) {
-        const chunkHash = hashChunk(chunk.text);
-        if (seenHashes.has(chunkHash)) continue;
-        seenHashes.add(chunkHash);
-
         const embedding = await generateEmbedding(chunk.text);
         if (embedding) {
-          const structured = extractStructuredData(chunk.text, platform);
           vectorDB.push({
             embedding,
             text: chunk.text,
             source: file,
             fileName,
             metadata: { platform: chunk.platform },
-            title: structured.title,
-            steps: structured.steps,
-            hash: chunkHash,
           });
           totalChunks++;
         }
@@ -401,11 +382,18 @@ async function indexDocs() {
 function quickPlatformDetect(query) {
   const lower = query.toLowerCase();
 
-  if (CONFIG.UNSUPPORTED_KEYWORDS.some(kw => lower.includes(kw))) {
+  const unsupportedKeywords = ['react native', 'reactnative', 'stripe', 'razorpay', 'paypal'];
+  if (unsupportedKeywords.some(kw => lower.includes(kw))) {
     return 'general';
   }
 
-  for (const [platform, keywords] of Object.entries(CONFIG.PLATFORM_KEYWORDS)) {
+  const platformKeywords = {
+    ios: ['ios', 'swift', 'swiftui', 'uikit', 'xcode', 'cocoapods', 'iphone', 'ipad', 'xcframework', 'cocoapod'],
+    flutter: ['flutter', 'dart', 'pubspec', 'flutter sdk', 'dartlang'],
+    android: ['android', 'kotlin', 'java', 'gradle', 'jetpack compose', 'android studio', 'aar', 'jetpack']
+  };
+
+  for (const [platform, keywords] of Object.entries(platformKeywords)) {
     if (keywords.some(kw => lower.includes(kw))) {
       return platform;
     }
@@ -434,11 +422,11 @@ Rules:
 Return ONLY the JSON object.`;
 
   try {
-    const response = await makeHttpPost(`${CONFIG.OLLAMA_URL}/generate`, {
-      model: CONFIG.LLM_MODEL,
+    const response = await makeHttpPost(`${OLLAMA_URL}/generate`, {
+      model: LLM_MODEL,
       prompt,
       stream: false,
-      options: { temperature: CONFIG.LLM_PARAMS.intent.temperature, top_p: CONFIG.LLM_PARAMS.intent.topP, num_predict: CONFIG.LLM_PARAMS.intent.maxTokens },
+      options: { temperature: 0.0, top_p: 0.9, num_predict: 128 },
     });
 
     let rawText = '';
@@ -453,7 +441,7 @@ Return ONLY the JSON object.`;
       const parsed = JSON.parse(jsonMatch[0]);
       const platform = (parsed.platform || 'general').toLowerCase();
 
-      const validPlatforms = CONFIG.VALID_PLATFORMS;
+      const validPlatforms = ['ios', 'flutter', 'android', 'general'];
       let detectedPlatform = validPlatforms.includes(platform) ? platform : 'general';
 
       const keywordResult = quickPlatformDetect(userQuery);
@@ -482,7 +470,7 @@ Return ONLY the JSON object.`;
 // 3. FILTERED RETRIEVAL
 // ============================================================
 
-async function searchVectorDB(userQuery, intent, topK = CONFIG.TOP_K_RESULTS) {
+async function searchVectorDB(userQuery, intent, topK = TOP_K_RESULTS) {
   const questionEmbedding = await generateEmbedding(userQuery);
   if (!questionEmbedding) {
     console.error('Failed to generate question embedding');
@@ -508,17 +496,17 @@ async function searchVectorDB(userQuery, intent, topK = CONFIG.TOP_K_RESULTS) {
     return { ...item, score };
   });
 
-  const thresholdFiltered = scored.filter(item => item.score >= CONFIG.SIMILARITY_THRESHOLD);
+  const thresholdFiltered = scored.filter(item => item.score >= 0.35);
 
   if (thresholdFiltered.length === 0) {
-    console.log(`⚠️ No chunks meet the similarity threshold (${CONFIG.SIMILARITY_THRESHOLD}). Highest score: ${scored[0]?.score.toFixed(4) || 'N/A'}`);
+    console.log(`⚠️ No chunks meet the similarity threshold (0.35). Highest score: ${scored[0]?.score.toFixed(4) || 'N/A'}`);
     return [];
   }
 
   thresholdFiltered.sort((a, b) => b.score - a.score);
   const results = thresholdFiltered.slice(0, topK);
 
-  console.log(`📊 Retrieved ${results.length} results (platform filter: "${targetPlatform}", threshold: ${CONFIG.SIMILARITY_THRESHOLD})`);
+  console.log(`📊 Retrieved ${results.length} results (platform filter: "${targetPlatform}", threshold: 0.35)`);
   results.forEach((r, i) => {
     console.log(`  ${i + 1}. [${r.metadata.platform}] ${r.fileName} (score: ${r.score.toFixed(4)})`);
   });
@@ -543,29 +531,36 @@ function buildGenerationPrompt(userQuery, retrievedChunks, intent) {
     ? 'The user query is platform-agnostic. Answer using the terminology found in the retrieved documentation.'
     : `The user is asking about the ${intent.platform.toUpperCase()} platform. Use ONLY the terminology, class names, and API conventions found in the retrieved ${intent.platform} documentation.`;
 
-  const apiContracts = CONFIG.PLATFORM_API_CONTRACTS[intent.platform] || '';
-  const contractsSection = apiContracts.trim()
-    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-KNOWN API CONTRACTS (from documentation)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${apiContracts}
-`
-    : '';
-
   return `You are the Moyasar AI Co-Pilot — an expert technical assistant for the Moyasar payment SDK.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ABSOLUTE RULES (NO EXCEPTIONS)
+NEGATIVE CONSTRAINTS (CRITICAL — NO EXCEPTIONS)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. The RETRIEVED DOCUMENTATION below is the ONLY source of truth. Your training knowledge does NOT apply.
-2. Copy code examples VERBATIM from the retrieved chunks. Do NOT paraphrase, modify, or combine with outside knowledge.
-3. If the retrieved docs show a method signature, callback type, or class name — use it exactly as written. Do not substitute a "similar" pattern from memory.
-4. If the answer is NOT in the retrieved documentation, say: "The retrieved documentation does not contain information about [X]."
-5. NEVER invent class names, method signatures, initializer parameters, or enum cases not present in the chunks.
-6. NEVER mix terminology from different payment methods.
+1. If the retrieved documentation chunks do NOT contain the specific method, class, or property name that the user is asking about, you MUST explicitly state: "The retrieved documentation does not contain information about [specific thing requested]."
+2. DO NOT guess or invent API names, method signatures, or code patterns that are not present in the retrieved context.
+3. NEVER use your internal training data to generate code syntax. Only use code that appears in the retrieved documentation.
+4. NEVER mix terminology from different platforms (e.g., do not combine iOS class names with Flutter concepts).
+5. If you cannot answer the question using ONLY the retrieved chunks, say so clearly instead of providing a potentially incorrect answer.
+6. DO NOT use code patterns like "paymentCompletionHandler", ".success/.failure", or "CreditCardView(paymentRequest:)" — these are NOT in the documentation. The correct pattern is: CreditCardView(request: callback:) with PaymentResult cases: .completed, .failed, .canceled, .saveOnlyToken.
+7. For UIKit integration, you MUST use UIHostingController to wrap the SwiftUI CreditCardView — do NOT add it directly as a subview.
 
-${contractsSection}${platformInstruction}
+${platformInstruction}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DYNAMIC TERMINOLOGY RULE (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You MUST answer using ONLY the terminology, class names, method names, and naming conventions found in the retrieved documentation chunks below.
+
+- If the docs use "PaymentConfig", use "PaymentConfig".
+- If the docs use "PaymentRequest", use "PaymentRequest".
+- If the docs use "MoyasarSdk", use "MoyasarSdk".
+- NEVER substitute terminology from other platforms.
+- NEVER invent API names, class names, or method names not present in the context.
+- Adapt your answer to match the exact naming conventions used in the retrieved chunks.
+- The CreditCardView initializer is: CreditCardView(request: createPaymentRequest()) { result in handlePaymentResult(result) }
+- PaymentResult cases are: .completed(ApiPayment), .failed(MoyasarError), .canceled, .saveOnlyToken(ApiToken)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RETRIEVED DOCUMENTATION
@@ -581,19 +576,21 @@ ${userQuery}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Answer using ONLY the documentation above. Copy code examples directly from the chunks. Use tables for parameter descriptions when the docs provide them. Reference source files at the end of your answer.`;
+Provide a comprehensive, well-structured answer using ONLY the terminology from the documentation above. If the documentation does not contain enough information to answer, clearly state what is missing.
+
+Use clean code blocks with the appropriate language tag. Use tables for field descriptions when applicable. Reference source files at the end of your answer.`;
 }
 
 // ============================================================
 // LLM Answer Generation
 // ============================================================
-async function callLLM(prompt, maxTokens = CONFIG.LLM_PARAMS.default.maxTokens, temperature = CONFIG.LLM_PARAMS.default.temperature) {
+async function callLLM(prompt, maxTokens = 2048, temperature = 0.1) {
   try {
-    const response = await makeHttpPost(`${CONFIG.OLLAMA_URL}/generate`, {
-      model: CONFIG.LLM_MODEL,
+    const response = await makeHttpPost(`${OLLAMA_URL}/generate`, {
+      model: LLM_MODEL,
       prompt,
       stream: false,
-      options: { temperature, top_p: CONFIG.LLM_PARAMS.generation.topP, num_predict: maxTokens },
+      options: { temperature, top_p: 0.9, num_predict: maxTokens },
     });
     if (response && typeof response === 'object') {
       let answer = response.response || response.text || response.content || JSON.stringify(response);
@@ -664,9 +661,8 @@ async function answerQuestion(question) {
 // Response Cache
 // ============================================================
 const responseCache = new Map();
-
-const embeddingCache = new Map();
-const expansionCache = new Map();
+const CACHE_TTL = 30 * 60 * 1000;
+const CACHE_MAX_SIZE = 500;
 
 function hashQuestion(question) {
   const normalized = question.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -677,7 +673,7 @@ function getCachedAnswer(question) {
   const hash = hashQuestion(question);
   const cached = responseCache.get(hash);
   if (!cached) return null;
-  if (Date.now() - cached.timestamp > CONFIG.CACHE_TTL) {
+  if (Date.now() - cached.timestamp > CACHE_TTL) {
     responseCache.delete(hash);
     return null;
   }
@@ -687,10 +683,10 @@ function getCachedAnswer(question) {
 
 function setCachedAnswer(question, answer) {
   const hash = hashQuestion(question);
-  if (responseCache.size >= CONFIG.CACHE_MAX_SIZE) {
+  if (responseCache.size >= CACHE_MAX_SIZE) {
     const entries = Array.from(responseCache.entries());
     entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-    const toRemove = Math.floor(CONFIG.CACHE_MAX_SIZE * CONFIG.CACHE_EVICTION_RATIO);
+    const toRemove = Math.floor(CACHE_MAX_SIZE * 0.2);
     for (let i = 0; i < toRemove; i++) responseCache.delete(entries[i][0]);
   }
   responseCache.set(hash, { answer, timestamp: Date.now(), hitCount: 1 });
@@ -699,284 +695,7 @@ function setCachedAnswer(question, answer) {
 function getCacheStats() {
   let totalHits = 0;
   responseCache.forEach(entry => { totalHits += entry.hitCount; });
-  return {
-    size: responseCache.size,
-    totalHits,
-    maxSize: CONFIG.CACHE_MAX_SIZE,
-    ttl: `${CONFIG.CACHE_TTL / 60000} minutes`,
-    embeddingCacheSize: embeddingCache.size,
-    expansionCacheSize: expansionCache.size,
-  };
-}
-
-// ============================================================
-// ENHANCED RAG PIPELINE
-// ============================================================
-
-async function cachedEmbedding(text) {
-  if (embeddingCache.has(text)) return embeddingCache.get(text);
-  const emb = await generateEmbedding(text);
-  if (emb) {
-    if (embeddingCache.size >= CONFIG.EMBEDDING_CACHE_MAX) {
-      embeddingCache.delete(embeddingCache.keys().next().value);
-    }
-    embeddingCache.set(text, emb);
-  }
-  return emb;
-}
-
-async function expandQuery(userQuery) {
-  const cacheKey = hashQuestion(userQuery);
-  if (expansionCache.has(cacheKey)) return expansionCache.get(cacheKey);
-
-  const prompt = `Generate 3 different search queries to retrieve relevant documentation for the following question. Return ONLY a JSON array of strings, no explanation, no markdown.
-
-Question: "${userQuery}"
-
-Example: ["query variant 1", "query variant 2", "query variant 3"]`;
-
-  try {
-    const res = await callLLM(prompt, CONFIG.LLM_PARAMS.expansion.maxTokens, CONFIG.LLM_PARAMS.expansion.temperature);
-    const jsonMatch = res && res.match(/\[[\s\S]*?\]/);
-    if (jsonMatch) {
-      const queries = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(queries) && queries.length > 0) {
-        const result = [userQuery, ...queries.slice(0, 3)];
-        expansionCache.set(cacheKey, result);
-        console.log(`🔎 Query expanded to ${result.length} variants`);
-        return result;
-      }
-    }
-  } catch (e) {
-    console.warn('⚠️ Query expansion failed, using original:', e.message);
-  }
-  return [userQuery];
-}
-
-async function hybridSearch(expandedQueries, intent, topK = CONFIG.TOP_K_RESULTS) {
-  const targetPlatform = intent.platform;
-  if (targetPlatform === 'general') {
-    console.log('⛔ Platform is "general" — asking user for clarification.');
-    return null;
-  }
-
-  const candidates = vectorDB.filter(item => item.metadata.platform === targetPlatform);
-  if (candidates.length === 0) {
-    console.log(`⚠️ No chunks found for platform "${targetPlatform}".`);
-    return [];
-  }
-
-  // Parallel embedding generation for all queries
-  const embeddings = await Promise.all(expandedQueries.map(q => cachedEmbedding(q)));
-  const validPairs = expandedQueries
-    .map((q, i) => ({ q, emb: embeddings[i] }))
-    .filter(p => p.emb !== null);
-
-  if (validPairs.length === 0) return [];
-
-  // Score each candidate across all query variants, keep best score per chunk
-  const scoreMap = new Map();
-  for (const { q, emb } of validPairs) {
-    const qLower = q.toLowerCase();
-    for (const item of candidates) {
-      const semantic = cosineSimilarity(emb, item.embedding);
-      const keyword = item.text.toLowerCase().includes(qLower) ? 1 : 0;
-      const score = CONFIG.HYBRID_SEMANTIC_WEIGHT * semantic + CONFIG.HYBRID_KEYWORD_WEIGHT * keyword;
-      const key = item.hash || (item.fileName + (item.title || ''));
-      const existing = scoreMap.get(key);
-      if (!existing || score > existing.score) {
-        scoreMap.set(key, { ...item, score });
-      }
-    }
-  }
-
-  const results = Array.from(scoreMap.values())
-    .filter(item => item.score >= CONFIG.SIMILARITY_THRESHOLD)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
-
-  console.log(`📊 Hybrid search: ${results.length} results (platform: "${targetPlatform}", queries: ${validPairs.length})`);
-  results.forEach((r, i) => {
-    console.log(`  ${i + 1}. [${r.metadata.platform}] ${r.fileName} (score: ${r.score.toFixed(4)})`);
-  });
-
-  return results;
-}
-
-async function rerankAndCompress(question, chunks) {
-  if (chunks.length === 0) return [];
-
-  const prompt = `For each document chunk below, score its relevance to the question (0.0–1.0) and extract only the relevant sentences.
-
-Question: ${question}
-
-Chunks:
-${chunks.map((c, i) => `[${i}] ${c.text.slice(0, 350)}`).join('\n\n')}
-
-Return ONLY a JSON array (no markdown, no explanation):
-[{"index": 0, "score": 0.9, "compressed": "relevant excerpt here"}]
-
-Order by descending score. Include only chunks with score > ${CONFIG.RERANK_MIN_SCORE}.`;
-
-  try {
-    const res = await callLLM(prompt, CONFIG.LLM_PARAMS.rerank.maxTokens, CONFIG.LLM_PARAMS.rerank.temperature);
-    const jsonMatch = res && res.match(/\[[\s\S]*?\]/);
-    if (jsonMatch) {
-      const ranked = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(ranked) && ranked.length > 0) {
-        console.log(`🏆 Reranked to ${ranked.length} relevant chunks`);
-        return ranked
-          .filter(r => typeof r.index === 'number' && r.index < chunks.length)
-          .map(r => ({
-            ...chunks[r.index],
-            text: (r.compressed && r.compressed.length > 20) ? r.compressed : chunks[r.index].text,
-            rerankScore: r.score,
-          }));
-      }
-    }
-  } catch (e) {
-    console.warn('⚠️ Rerank+compress failed, using original order:', e.message);
-  }
-  return chunks;
-}
-
-async function validateAnswer(answer, context, question) {
-  const prompt = `Check whether this answer is fully supported by the provided context. Do not use any outside knowledge.
-
-Answer:
-${answer.slice(0, 800)}
-
-Context:
-${context.slice(0, 600)}
-
-Question: ${question}
-
-Return ONLY JSON (no markdown):
-{"is_correct": true, "issues": []}`;
-
-  try {
-    const res = await callLLM(prompt, CONFIG.LLM_PARAMS.validation.maxTokens, CONFIG.LLM_PARAMS.validation.temperature);
-    const jsonMatch = res && res.match(/\{[\s\S]*?\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    console.warn('⚠️ Validation failed, assuming correct:', e.message);
-  }
-  return { is_correct: true, issues: [] };
-}
-
-/**
- * Shared pre-processing step: intent → query expansion → hybrid search → optional rerank+compress.
- * Returns { intent, chunks, context, topScore } or { needsClarification } or { noResults }.
- */
-async function prepareContext(question) {
-  // Step 1: Intent detection
-  const intent = await analyzeIntent(question);
-  console.log(`🎯 Intent: ${JSON.stringify(intent)}`);
-
-  if (intent.platform === 'general') {
-    return { needsClarification: true, intent };
-  }
-
-  // Step 2: Choose fast or full pipeline based on query length
-  const wordCount = question.trim().split(/\s+/).length;
-  const isSimple = wordCount <= CONFIG.SIMPLE_QUERY_WORD_LIMIT;
-  let expandedQueries;
-
-  if (isSimple) {
-    console.log('⚡ Fast mode: direct hybrid search');
-    expandedQueries = [question];
-  } else {
-    console.log('🔥 Full mode: query expansion + hybrid search');
-    expandedQueries = await expandQuery(question);
-  }
-
-  // Step 3: Hybrid search
-  const chunks = await hybridSearch(expandedQueries, intent, isSimple ? CONFIG.TOP_K_RESULTS : CONFIG.TOP_K_FULL_MODE);
-
-  if (chunks === null) return { needsClarification: true, intent };
-  if (!chunks || chunks.length === 0) return { noResults: true, intent };
-
-  const topScore = chunks[0].score;
-
-  // Step 4: Rerank + compress (skip for fast mode or very high confidence)
-  let finalChunks;
-  if (!isSimple && topScore <= CONFIG.FAST_PATH_THRESHOLD) {
-    console.log(`🔄 Running rerank+compress (top score: ${topScore.toFixed(3)})...`);
-    finalChunks = await rerankAndCompress(question, chunks.slice(0, CONFIG.RERANK_INPUT_SIZE));
-    if (finalChunks.length === 0) finalChunks = chunks.slice(0, CONFIG.RERANK_OUTPUT_SIZE);
-  } else {
-    console.log(`✅ Skipping rerank (${isSimple ? 'fast mode' : `high confidence: ${topScore.toFixed(3)}`})`);
-    finalChunks = chunks.slice(0, CONFIG.RERANK_OUTPUT_SIZE);
-  }
-
-  const context = finalChunks.map(c => c.text).join('\n\n');
-  return { intent, chunks: finalChunks, context, topScore };
-}
-
-async function enhancedAnswerPipeline(question) {
-  console.log(`\n⚡ Enhanced RAG Pipeline starting...`);
-  console.log(`📝 Question: ${question}`);
-
-  const prep = await prepareContext(question);
-
-  if (prep.needsClarification) {
-    return {
-      answer: 'I need to know which platform you\'re asking about to provide an accurate answer. Please specify one of: **iOS** (Swift/SwiftUI), **Flutter** (Dart), or **Android** (Kotlin/Java).',
-      metadata: { intent: prep.intent, needsClarification: true },
-    };
-  }
-
-  if (prep.noResults || prep.error) {
-    return {
-      answer: 'No relevant documentation found for your question. Please try rephrasing or check if the topic is covered in the SDK documentation.',
-      metadata: { intent: prep.intent, resultsCount: 0 },
-    };
-  }
-
-  const { intent, chunks, context, topScore } = prep;
-  const prompt = buildGenerationPrompt(question, chunks, intent);
-  console.log(`🤖 Calling LLM (prompt: ${prompt.length} chars)...`);
-
-  const answer = await callLLM(prompt, 3072, 0.15);
-  if (!answer) {
-    return {
-      answer: 'Error processing your question. Please try again.',
-      metadata: { intent, resultsCount: chunks.length },
-    };
-  }
-
-  // Step 5: Validate answer (skip for very high confidence)
-  if (topScore < CONFIG.SKIP_VALIDATION_THRESHOLD) {
-    console.log('🔍 Validating answer...');
-    const validation = await validateAnswer(answer, context, question);
-    if (!validation.is_correct) {
-      console.warn('⚠️ Validation failed:', validation.issues);
-      return {
-        answer: answer + '\n\n> ⚠️ *Note: Some parts of this answer may not be fully supported by the available documentation.*',
-        metadata: { intent, resultsCount: chunks.length, topScore, validationIssues: validation.issues },
-      };
-    }
-  } else {
-    console.log(`✅ Skipping validation (high confidence: ${topScore.toFixed(3)})`);
-  }
-  console.log(`✅ Pipeline complete! (${answer.length} chars)`);
-  return {
-    answer,
-    metadata: {
-      intent,
-      resultsCount: chunks.length,
-      topScore,
-      platforms: [...new Set(chunks.map(r => r.metadata.platform))],
-    },
-  };
-}
-
-
-// ============================================================
-// MAIN PIPELINE (delegates to enhanced pipeline)
-// ============================================================
-async function answerQuestion(question) {
-  return enhancedAnswerPipeline(question);
+  return { size: responseCache.size, totalHits, maxSize: CACHE_MAX_SIZE, ttl: `${CACHE_TTL / 60000} minutes` };
 }
 
 // ============================================================
@@ -1038,31 +757,34 @@ app.post('/ask/stream', async (req, res) => {
 
     sendEvent('status', { message: '🔍 Analyzing intent...' });
 
-    const prep = await prepareContext(question);
+    const intent = await analyzeIntent(question);
 
-    if (prep.needsClarification) {
+    sendEvent('status', { message: '📚 Searching documentation...' });
+
+    const results = await searchVectorDB(question, intent);
+
+    if (results === null) {
       sendEvent('chunk', { text: 'Please specify your platform: iOS (Swift/SwiftUI), Flutter (Dart), or Android (Kotlin/Java).' });
       sendEvent('done', {});
       return res.end();
     }
 
-    if (prep.noResults || prep.error) {
+    if (results.length === 0) {
       sendEvent('chunk', { text: 'No relevant documentation found. Please try rephrasing your question.' });
       sendEvent('done', {});
       return res.end();
     }
 
-    const { intent, chunks, context, topScore } = prep;
-    const prompt = buildGenerationPrompt(question, chunks, intent);
+    const prompt = buildGenerationPrompt(question, results, intent);
 
     sendEvent('status', { message: '🤖 Generating answer...' });
 
     let fullAnswer = '';
-    await makeHttpStream(`${CONFIG.OLLAMA_URL}/generate`, {
-      model: CONFIG.LLM_MODEL,
+    await makeHttpStream(`${OLLAMA_URL}/generate`, {
+      model: LLM_MODEL,
       prompt,
       stream: true,
-      options: { temperature: CONFIG.LLM_PARAMS.generation.temperature, top_p: CONFIG.LLM_PARAMS.generation.topP, num_predict: CONFIG.LLM_PARAMS.generation.maxTokens },
+      options: { temperature: 0.15, top_p: 0.9, num_predict: 3072 },
     }, (chunk) => {
       if (chunk.response) {
         fullAnswer += chunk.response;
@@ -1077,22 +799,12 @@ app.post('/ask/stream', async (req, res) => {
         sendEvent('done', {
           metadata: {
             intent,
-            resultsCount: chunks.length,
-            topScore,
-            platforms: [...new Set(chunks.map(r => r.metadata.platform))],
+            resultsCount: results.length,
+            platforms: [...new Set(results.map(r => r.metadata.platform))],
           },
         });
       }
     });
-
-    // Post-stream validation for lower-confidence results
-    if (topScore < CONFIG.SKIP_VALIDATION_THRESHOLD && fullAnswer.length > 0) {
-      const validation = await validateAnswer(fullAnswer, context, question);
-      if (!validation.is_correct) {
-        console.warn('⚠️ Post-stream validation failed:', validation.issues);
-        sendEvent('chunk', { text: '\n\n> ⚠️ *Note: Some parts of this answer may not be fully supported by the available documentation.*' });
-      }
-    }
 
     res.end();
   } catch (error) {
@@ -1110,11 +822,10 @@ app.get('/status', (req, res) => {
 
   res.json({
     totalChunks: vectorDB.length,
-    embeddingModel: CONFIG.EMBEDDING_MODEL,
-    llmModel: CONFIG.LLM_MODEL,
+    embeddingModel: EMBEDDING_MODEL,
+    llmModel: LLM_MODEL,
     platforms: platformCounts,
     cache: getCacheStats(),
-    pipeline: 'Enhanced RAG (intent → query expansion → hybrid search → rerank+compress → validate)',
   });
 });
 
@@ -1139,11 +850,11 @@ app.get('/', (req, res) => {
 // ============================================================
 // Start Server
 // ============================================================
-app.listen(CONFIG.PORT, async () => {
-  console.log(`🚀 Server running on http://localhost:${CONFIG.PORT}`);
-  console.log(`📦 Embedding model: ${CONFIG.EMBEDDING_MODEL}`);
-  console.log(`🤖 LLM model: ${CONFIG.LLM_MODEL}`);
-  console.log('🧠 Engine: Enhanced RAG (intent → query expansion → hybrid search → rerank+compress → validate)');
+app.listen(3001, async () => {
+  console.log('🚀 Server running on http://localhost:3001');
+  console.log(`📦 Embedding model: ${EMBEDDING_MODEL}`);
+  console.log(`🤖 LLM model: ${LLM_MODEL}`);
+  console.log('🧠 Engine: Dynamic RAG (LLM Intent Router + Metadata Filtering)');
   console.log('📚 Starting indexing...\n');
   await indexDocs();
 });
